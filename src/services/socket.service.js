@@ -257,17 +257,39 @@ class SocketService {
                 
                 const savedAnswers = await this.saveQuestionAnswers(scanId, data.questionResults || []);
                 
-                const quizPoints = savedAnswers.reduce((sum, ans) => sum + (ans.puntos_obtenidos || 0), 0);
+                // Calcular estadísticas de intentos
+                const totalIntentos = savedAnswers.length;
+                const intentosCorrectos = savedAnswers.filter(ans => ans.es_correcta).length;
+                const intentosIncorrectos = totalIntentos - intentosCorrectos;
+                
+                // Calcular preguntas únicas
+                const uniqueQuestionIds = new Set();
                 let totalQuizPoints = 0;
+                
                 for (const ans of savedAnswers) {
-                    try {
-                        const question = await Question.findById(ans.pregunta_id);
-                        if (question) {
-                            totalQuizPoints += question.puntos;
+                    const questionIdStr = ans.pregunta_id.toString();
+                    if (!uniqueQuestionIds.has(questionIdStr)) {
+                        uniqueQuestionIds.add(questionIdStr);
+                        try {
+                            const question = await Question.findById(ans.pregunta_id);
+                            if (question) {
+                                totalQuizPoints += question.puntos;
+                            }
+                        } catch (err) {
                         }
-                    } catch (err) {
                     }
                 }
+                
+                const totalPreguntas = uniqueQuestionIds.size;
+                const preguntasCorrectas = new Set(
+                    savedAnswers.filter(ans => ans.es_correcta).map(ans => ans.pregunta_id.toString())
+                ).size;
+                const preguntasIncorrectas = totalPreguntas - preguntasCorrectas;
+                
+                // Calcular puntos obtenidos (solo de los intentos correctos)
+                const quizPoints = savedAnswers
+                    .filter(ans => ans.es_correcta)
+                    .reduce((sum, ans) => sum + (ans.puntos_obtenidos || 0), 0);
                 
                 scan.estado = 'finalizado';
                 scan.fecha_fin = new Date();
@@ -276,7 +298,13 @@ class SocketService {
                 scan.puntuacion = {
                     puntos_cuestionario: quizPoints,
                     total_puntos_cuestionario: totalQuizPoints || 100,
-                    vulnerabilidades_encontradas: savedVulnerabilityIds.length
+                    vulnerabilidades_encontradas: savedVulnerabilityIds.length,
+                    total_intentos: totalIntentos,
+                    intentos_correctos: intentosCorrectos,
+                    intentos_incorrectos: intentosIncorrectos,
+                    total_preguntas: totalPreguntas,
+                    preguntas_correctas: preguntasCorrectas,
+                    preguntas_incorrectas: preguntasIncorrectas
                 };
                 
                 scan.calculateScore();
@@ -404,6 +432,7 @@ class SocketService {
     async saveQuestionAnswers(scanId, questionResults) {
         const savedAnswers = [];
 
+        // Guardar TODOS los intentos (correctos e incorrectos)
         for (const result of questionResults) {
             try {
                 let question;
@@ -469,14 +498,16 @@ class SocketService {
                 const selectedAnswerIndex = result.userAnswer !== undefined ? result.userAnswer : -1;
                 const respuesta_seleccionada_id = savedAnswerIds[selectedAnswerIndex] || savedAnswerIds[0];
 
-                // Client requirement: +10 points per correct answer, 0 for incorrect
-                const puntos = (result.correct || false) ? 10 : 0;
+                // Sistema de puntos por intentos: 1er intento=100%, 2do=80%, 3ro+=20% del valor de la pregunta
+                const puntos = result.pointsEarned || 0;
+                const intentos = result.attempts || 1;
                 
                 const userAnswer = {
                     pregunta_id: question._id,
                     respuesta_seleccionada_id: respuesta_seleccionada_id,
                     es_correcta: result.correct || false,
-                    puntos_obtenidos: puntos
+                    puntos_obtenidos: puntos,
+                    numero_intentos: intentos
                 };
 
                 savedAnswers.push(userAnswer);

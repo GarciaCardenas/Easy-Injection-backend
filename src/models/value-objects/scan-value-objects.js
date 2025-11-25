@@ -87,18 +87,21 @@ class UserAnswer {
     #respuesta_seleccionada_id;
     #es_correcta;
     #puntos_obtenidos;
+    #numero_intentos;
 
     constructor(data = {}) {
         this.#pregunta_id = data.pregunta_id;
         this.#respuesta_seleccionada_id = data.respuesta_seleccionada_id;
         this.#es_correcta = Boolean(data.es_correcta);
         this.#puntos_obtenidos = data.puntos_obtenidos || 0;
+        this.#numero_intentos = data.numero_intentos || 1;
     }
 
     get pregunta_id() { return this.#pregunta_id; }
     get respuesta_seleccionada_id() { return this.#respuesta_seleccionada_id; }
     get es_correcta() { return this.#es_correcta; }
     get puntos_obtenidos() { return this.#puntos_obtenidos; }
+    get numero_intentos() { return this.#numero_intentos; }
 
     isCorrect() {
         return this.#es_correcta === true;
@@ -109,7 +112,8 @@ class UserAnswer {
             pregunta_id: this.#pregunta_id,
             respuesta_seleccionada_id: this.#respuesta_seleccionada_id,
             es_correcta: this.#es_correcta,
-            puntos_obtenidos: this.#puntos_obtenidos
+            puntos_obtenidos: this.#puntos_obtenidos,
+            numero_intentos: this.#numero_intentos
         };
     }
 }
@@ -141,16 +145,30 @@ class Score {
     }
 
     calculateFinalScore() {
-        const maxScore = 100;
-        
-        let quizPercentage = 0;
+        // Componente de cuestionario (60% del total)
+        let quizScore = 0;
         if (this.#total_puntos_cuestionario > 0) {
-            quizPercentage = (this.#puntos_cuestionario / this.#total_puntos_cuestionario) * 60;
+            // Calcular porcentaje obtenido del cuestionario
+            const porcentajeCuestionario = this.#puntos_cuestionario / this.#total_puntos_cuestionario;
+            // Escalar al 60%
+            quizScore = porcentajeCuestionario * 60;
         }
         
-        const vulnerabilityScore = Math.max(0, 40 - (this.#vulnerabilidades_encontradas * 5));
+        // Componente de vulnerabilidades (base 40 puntos)
+        const penalizacionVulnerabilidades = this.#vulnerabilidades_encontradas * 5;
+        let vulnerabilityScore = 40;
+        let penalizacionExcedente = 0;
         
-        this.#puntuacion_final = Math.round(quizPercentage + vulnerabilityScore);
+        if (penalizacionVulnerabilidades > 40) {
+            // Si la penalización supera 40, el excedente se descuenta del cuestionario
+            vulnerabilityScore = 0;
+            penalizacionExcedente = penalizacionVulnerabilidades - 40;
+        } else {
+            vulnerabilityScore = 40 - penalizacionVulnerabilidades;
+        }
+        
+        // Puntuación final con mínimo de 0
+        this.#puntuacion_final = Math.max(0, Math.round(quizScore - penalizacionExcedente + vulnerabilityScore));
         
         if (this.#puntuacion_final >= 90) {
             this.#calificacion = 'Excelente';
