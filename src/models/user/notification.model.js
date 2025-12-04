@@ -56,24 +56,10 @@ class Notification extends BaseModel {
     }
 
     get user_id() { return this.#user_id; }
-    set user_id(value) { if (!value) throw new Error('El ID del usuario es obligatorio'); this.#user_id = value; }
-
     get tipo() { return this.#tipo; }
-    set tipo(value) {
-        const validTypes = ['scan_completed', 'vulnerability_detected', 'resource_available'];
-        if (!validTypes.includes(value)) throw new Error(`Tipo inválido: ${value}`);
-        this.#tipo = value;
-    }
-
     get titulo() { return this.#titulo; }
-    set titulo(value) { if (!value) throw new Error('El título es obligatorio'); this.#titulo = value; }
-
     get mensaje() { return this.#mensaje; }
-    set mensaje(value) { if (!value) throw new Error('El mensaje es obligatorio'); this.#mensaje = value; }
-
     get relatedId() { return this.#relatedId; }
-    set relatedId(value) { this.#relatedId = value; }
-
     get leido() { return this.#leido; }
     get fecha() { return this.#fecha; }
 

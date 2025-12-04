@@ -3,9 +3,8 @@ const BaseModel = require('./base/BaseModel');
 const ModelHelpers = require('./base/ModelHelpers');
 
 // Value Objects
-const { Profile, AnswerHistory } = require('./value-objects/user-value-objects');
-const { ScanFlags, Credentials, UserAnswer, Score } = require('./value-objects/scan-value-objects');
-const { ReportSummary } = require('./value-objects/report-summary');
+const { Profile } = require('./value-objects/user-value-objects');
+const { ScanFlags, UserAnswer, Score } = require('./value-objects/scan-value-objects');
 
 // User Models
 const { User, validate: validateUser } = require('./user/user.model');
@@ -35,12 +34,9 @@ module.exports = {
 
     // Value Objects
     Profile,
-    AnswerHistory,
     ScanFlags,
-    Credentials,
     UserAnswer,
     Score,
-    ReportSummary,
     LessonEntry,
 
     // User Models

@@ -5,16 +5,7 @@ const config = require('config');
 const debug = require('debug')('easyinjection:models:user');
 const BaseModel = require('../base/BaseModel');
 const { buildObject } = require('../base/ModelHelpers');
-const { Profile, AnswerHistory } = require('../value-objects/user-value-objects');
-
-const historySchema = new mongoose.Schema({
-    pregunta_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Question', required: true },
-    respuesta_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Answer', required: true },
-    correcta: { type: Boolean, default: false },
-    tiempo_respuesta_seg: { type: Number },
-    puntos_obtenidos: { type: Number },
-    fecha_respuesta: { type: Date, default: Date.now }
-});
+const { Profile } = require('../value-objects/user-value-objects');
 
 const profileSchema = new mongoose.Schema({
     nivel_actual: { type: Number, default: 1 },
@@ -37,7 +28,6 @@ const userSchema = new mongoose.Schema({
     email: { type: String, minlength: 5, maxlength: 255, unique: true, required: true },
     contrasena_hash: { type: String, minlength: 5, maxlength: 1024, required: true },
     perfil: profileSchema,
-    historial_respuestas: [historySchema],
     fecha_registro: { type: Date, default: Date.now },
     ultimo_login: { type: Date },
     estado_cuenta: { type: String, enum: ['pendiente', 'activo', 'inactivo', 'suspendido'], default: 'pendiente' },
@@ -58,7 +48,7 @@ const userSchema = new mongoose.Schema({
 const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
 
 class User extends BaseModel {
-    #username; #email; #contrasena_hash; #perfil; #historial_respuestas;
+    #username; #email; #contrasena_hash; #perfil;
     #fecha_registro; #ultimo_login; #estado_cuenta; #email_verificado; #token_verificacion;
     #fecha_expiracion_token; #activo; #codigo_verificacion; #fecha_verificacion;
     #googleId; #passwordResetToken; #passwordResetExpires; #acceptedTerms; #acceptedTermsDate;
@@ -71,7 +61,6 @@ class User extends BaseModel {
         this.#email = plainData.email;
         this.#contrasena_hash = plainData.contrasena_hash;
         this.#perfil = new Profile(plainData.perfil || {});
-        this.#historial_respuestas = (plainData.historial_respuestas || []).map(h => new AnswerHistory(h));
         this.#fecha_registro = plainData.fecha_registro || new Date();
         this.#ultimo_login = plainData.ultimo_login;
         this.#estado_cuenta = plainData.estado_cuenta || 'pendiente';
@@ -100,14 +89,8 @@ class User extends BaseModel {
     set contrasena_hash(value) { if (!value) throw new Error('La contraseña hash es obligatoria'); this.#contrasena_hash = value; }
 
     get perfil() { return this.#perfil; }
-    set perfil(value) { this.#perfil = new Profile(value); }
-
-    get historial_respuestas() { return this.#historial_respuestas; }
-    set historial_respuestas(value) { this.#historial_respuestas = (value || []).map(h => new AnswerHistory(h)); }
-
     get fecha_registro() { return this.#fecha_registro; }
     get ultimo_login() { return this.#ultimo_login; }
-    set ultimo_login(value) { this.#ultimo_login = value; }
 
     get estado_cuenta() { return this.#estado_cuenta; }
     set estado_cuenta(value) {
@@ -120,34 +103,17 @@ class User extends BaseModel {
     set email_verificado(value) { this.#email_verificado = Boolean(value); }
 
     get token_verificacion() { return this.#token_verificacion; }
-    set token_verificacion(value) { this.#token_verificacion = value; }
-
     get fecha_expiracion_token() { return this.#fecha_expiracion_token; }
-    set fecha_expiracion_token(value) { this.#fecha_expiracion_token = value; }
-
     get activo() { return this.#activo; }
-    set activo(value) { this.#activo = Boolean(value); }
-
     get codigo_verificacion() { return this.#codigo_verificacion; }
-    set codigo_verificacion(value) { this.#codigo_verificacion = value; }
-
     get fecha_verificacion() { return this.#fecha_verificacion; }
-    set fecha_verificacion(value) { this.#fecha_verificacion = value; }
-
     get googleId() { return this.#googleId; }
-    set googleId(value) { this.#googleId = value; }
-
     get passwordResetToken() { return this.#passwordResetToken; }
     set passwordResetToken(value) { this.#passwordResetToken = value; }
-
     get passwordResetExpires() { return this.#passwordResetExpires; }
     set passwordResetExpires(value) { this.#passwordResetExpires = value; }
-
     get acceptedTerms() { return this.#acceptedTerms; }
-    set acceptedTerms(value) { this.#acceptedTerms = Boolean(value); }
-
     get acceptedTermsDate() { return this.#acceptedTermsDate; }
-    set acceptedTermsDate(value) { this.#acceptedTermsDate = value; }
 
     get activeSessions() { return [...this.#activeSessions]; }
 
@@ -159,16 +125,6 @@ class User extends BaseModel {
         this.#email_verificado = true;
         this.#estado_cuenta = 'activo';
     }
-
-    deactivate() {
-        debug('Desactivando usuario: %s', this.#username);
-        this.#activo = false;
-        this.#estado_cuenta = 'inactivo';
-    }
-
-    isActive() { return this.#activo === true; }
-    isPending() { return this.#estado_cuenta === 'pendiente'; }
-    isSuspended() { return this.#estado_cuenta === 'suspendido'; }
 
     generateAuthToken() {
         debug('Generando token JWT para usuario: %s', this.#username);
@@ -198,35 +154,8 @@ class User extends BaseModel {
         debug('Agregando %d puntos a usuario: %s', points, this.#username);
         this.#perfil.addPoints(points);
     }
-    levelUp() { this.#perfil.levelUp(); }
     updateLevel(level) { this.#perfil.updateLevel(level); }
     setAvatar(avatarId) { this.#perfil.setAvatar(avatarId); }
-    getAvatarId() { return this.#perfil.getAvatarId(); }
-
-    updateAnswerHistory(preguntaId, respuestaId, esCorrecta, tiempoRespuesta = 0, puntosObtenidos = 0) {
-        if (!this.#historial_respuestas) this.#historial_respuestas = [];
-        const newHistory = new AnswerHistory({
-            pregunta_id: preguntaId,
-            respuesta_id: respuestaId,
-            correcta: esCorrecta,
-            tiempo_respuesta_seg: tiempoRespuesta,
-            puntos_obtenidos: puntosObtenidos,
-            fecha_respuesta: new Date()
-        });
-        this.#historial_respuestas.push(newHistory);
-        debug('Historial de respuestas actualizado para usuario: %s', this.#username);
-    }
-
-    getAccuracy() {
-        if (!this.#historial_respuestas || this.#historial_respuestas.length === 0) return 0;
-        const totalCorrect = this.#historial_respuestas.filter(h => h.correcta).length;
-        const total = this.#historial_respuestas.length;
-        return total > 0 ? (totalCorrect / total) * 100 : 0;
-    }
-
-    getTotalAnswers() {
-        return this.#historial_respuestas ? this.#historial_respuestas.length : 0;
-    }
 
     addSession(sessionData) {
         if (!this.#activeSessions) this.#activeSessions = [];
@@ -240,11 +169,6 @@ class User extends BaseModel {
         debug('Sesión agregada para usuario: %s', this.#username);
     }
 
-    removeSession(token) {
-        this.#activeSessions = this.#activeSessions.filter(s => s.token !== token);
-        debug('Sesión removida para usuario: %s', this.#username);
-    }
-
     clearAllSessions() {
         this.#activeSessions = [];
         debug('Todas las sesiones eliminadas para usuario: %s', this.#username);
@@ -254,31 +178,16 @@ class User extends BaseModel {
         return this.#activeSessions ? this.#activeSessions.length : 0;
     }
 
-    acceptTerms() {
-        this.#acceptedTerms = true;
-        this.#acceptedTermsDate = new Date();
-        debug('Términos aceptados por usuario: %s', this.#username);
-    }
-
     setPasswordResetToken(token, expiresInHours = 1) {
         this.#passwordResetToken = token;
         this.#passwordResetExpires = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
         debug('Token de reseteo de contraseña establecido para: %s', this.#username);
     }
 
-    clearPasswordResetToken() {
-        this.#passwordResetToken = null;
-        this.#passwordResetExpires = null;
-    }
-
-    isPasswordResetTokenValid() {
-        return this.#passwordResetToken && this.#passwordResetExpires && this.#passwordResetExpires > new Date();
-    }
-
     static createEmpty() {
         return new User({
             username: '', email: '', contrasena_hash: '', perfil: Profile.createEmpty().toObject(),
-            historial_respuestas: [], activo: false
+            activo: false
         });
     }
 
@@ -298,7 +207,7 @@ class User extends BaseModel {
     toObject() {
         return {
             ...buildObject(this, [
-                'username', 'email', 'contrasena_hash', 'perfil', 'historial_respuestas',
+                'username', 'email', 'contrasena_hash', 'perfil',
                 'fecha_registro', 'ultimo_login', 'estado_cuenta', 'email_verificado',
                 'token_verificacion', 'fecha_expiracion_token', 'activo', 'codigo_verificacion',
                 'fecha_verificacion', 'googleId', 'passwordResetToken', 'passwordResetExpires',
@@ -321,8 +230,6 @@ class User extends BaseModel {
             ultimo_login: this.#ultimo_login,
             nivel: this.getLevel(),
             puntosTotales: this.getTotalPoints(),
-            precision: this.getAccuracy(),
-            totalRespuestas: this.getTotalAnswers(),
             sesionesActivas: this.getActiveSessionCount(),
             googleConnected: !!this.#googleId,
             acceptedTerms: this.#acceptedTerms

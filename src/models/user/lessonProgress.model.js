@@ -24,7 +24,6 @@ class LessonEntry {
   get completedAt() { return this.#completedAt; }
   get viewCount() { return this.#viewCount; }
 
-  isNotStarted() { return this.#status === 'not_started'; }
   isViewed() { return this.#status === 'viewed'; }
   isCompleted() { return this.#status === 'completed'; }
 

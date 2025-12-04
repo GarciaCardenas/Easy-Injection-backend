@@ -56,46 +56,16 @@ class Activity extends BaseModel {
   }
 
   get user_id() { return this.#user_id; }
-  set user_id(value) { if (!value) throw new Error('El ID del usuario es obligatorio'); this.#user_id = value; }
-
   get type() { return this.#type; }
-  set type(value) {
-    const validTypes = ['scan_completed', 'resource_available'];
-    if (!validTypes.includes(value)) throw new Error(`Tipo inválido: ${value}`);
-    this.#type = value;
-  }
-
   get title() { return this.#title; }
-  set title(value) { if (!value) throw new Error('El título es obligatorio'); this.#title = value; }
-
   get description() { return this.#description; }
-  set description(value) { if (!value) throw new Error('La descripción es obligatoria'); this.#description = value; }
-
   get relatedId() { return this.#relatedId; }
-  set relatedId(value) { this.#relatedId = value; }
-
   get date() { return this.#date; }
   get read() { return this.#read; }
-
-  markAsRead() {
-    debug('Marcando actividad como leída: %s', this._id);
-    this.#read = true;
-  }
-  
-  markAsUnread() {
-    debug('Marcando actividad como no leída: %s', this._id);
-    this.#read = false;
-  }
-  
-  isRead() { return this.#read === true; }
   
   isRecent() {
     const daysSinceCreated = (new Date() - new Date(this.#date)) / (1000 * 60 * 60 * 24);
     return daysSinceCreated < 7;
-  }
-  
-  getAge() {
-    return Math.floor((new Date() - new Date(this.#date)) / (1000 * 60 * 60 * 24));
   }
 
   getDisplayType() {

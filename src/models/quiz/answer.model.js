@@ -24,37 +24,12 @@ class Answer extends BaseModel {
     }
 
     get pregunta_id() { return this.#pregunta_id; }
-    set pregunta_id(value) {
-        if (!value) throw new Error('El ID de la pregunta es obligatorio');
-        this.#pregunta_id = value;
-    }
-
     get texto_respuesta() { return this.#texto_respuesta; }
-    set texto_respuesta(value) {
-        if (!value || value.trim().length === 0) throw new Error('El texto de la respuesta es obligatorio');
-        this.#texto_respuesta = value;
-    }
-
     get es_correcta() { return this.#es_correcta; }
-    set es_correcta(value) { this.#es_correcta = Boolean(value); }
 
-    isCorrect() { return this.#es_correcta === true; }
-    isIncorrect() { return this.#es_correcta === false; }
     getDisplayText() { return this.#texto_respuesta; }
 
-    getPoints(questionPoints, questionDifficulty) {
-        if (!this.#es_correcta) return 0;
-        const multipliers = { 'facil': 1.0, 'media': 1.5, 'dificil': 2.0 };
-        const multiplier = multipliers[questionDifficulty] || 1.0;
-        return Math.round(questionPoints * multiplier);
-    }
-
-    markAsCorrect() { this.#es_correcta = true; }
-    markAsIncorrect() { this.#es_correcta = false; }
-
     static createEmpty(preguntaId) { return new Answer({ pregunta_id: preguntaId, texto_respuesta: '', es_correcta: false }); }
-    static createCorrect(preguntaId, texto) { return new Answer({ pregunta_id: preguntaId, texto_respuesta: texto, es_correcta: true }); }
-    static createIncorrect(preguntaId, texto) { return new Answer({ pregunta_id: preguntaId, texto_respuesta: texto, es_correcta: false }); }
 
     static validate(answer) {
         return Joi.object({
@@ -62,11 +37,6 @@ class Answer extends BaseModel {
             texto_respuesta: Joi.string().required(),
             es_correcta: Joi.boolean()
         }).validate(answer);
-    }
-
-    static async findCorrectAnswer(preguntaId) {
-        const doc = await AnswerModel.findOne({ pregunta_id: preguntaId, es_correcta: true });
-        return Answer.fromMongoose(doc);
     }
 
     static get Model() { return AnswerModel; }

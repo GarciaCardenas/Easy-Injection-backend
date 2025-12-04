@@ -28,38 +28,10 @@ class AuthType extends BaseModel {
         this.#descripcion = plainData.descripcion;
     }
 
-    get nombre() {
-        return this.#nombre;
-    }
-
-    set nombre(value) {
-        const validValues = ['usuario_password', 'token', 'oauth2', 'apikey'];
-        if (!validValues.includes(value)) {
-            throw new Error(`Tipo de autenticación inválido. Debe ser uno de: ${validValues.join(', ')}`);
-        }
-        this.#nombre = value;
-    }
-
-    get descripcion() {
-        return this.#descripcion;
-    }
-
-    set descripcion(value) {
-        if (value && value.length > 255) {
-            throw new Error('La descripción no puede exceder 255 caracteres');
-        }
-        this.#descripcion = value;
-    }
+    get nombre() { return this.#nombre; }
+    get descripcion() { return this.#descripcion; }
 
     // Métodos de dominio
-    requiresCredentials() {
-        return this.#nombre === 'usuario_password';
-    }
-
-    isTokenBased() {
-        return ['token', 'oauth2', 'apikey'].includes(this.#nombre);
-    }
-
     getDisplayName() {
         const names = {
             'usuario_password': 'Usuario y Contraseña',
@@ -68,20 +40,6 @@ class AuthType extends BaseModel {
             'apikey': 'API Key'
         };
         return names[this.#nombre] || this.#nombre;
-    }
-
-    getSecurityLevel() {
-        const levels = {
-            'usuario_password': 'Media',
-            'token': 'Alta',
-            'oauth2': 'Alta',
-            'apikey': 'Media'
-        };
-        return levels[this.#nombre] || 'Baja';
-    }
-
-    supportsMultiFactor() {
-        return ['usuario_password', 'oauth2'].includes(this.#nombre);
     }
 
     static createEmpty() {

@@ -50,10 +50,6 @@ class Profile {
         return this.#avatarId;
     }
 
-    isMaxLevel() {
-        return this.#nivel_actual >= 100;
-    }
-
     toObject() {
         return {
             nivel_actual: this.#nivel_actual,
@@ -127,70 +123,7 @@ class Notification {
     }
 }
 
-class AnswerHistory {
-    #pregunta_id;
-    #respuesta_id;
-    #correcta;
-    #tiempo_respuesta_seg;
-    #puntos_obtenidos;
-    #fecha_respuesta;
-
-    constructor(data = {}) {
-        this.#pregunta_id = data.pregunta_id;
-        this.#respuesta_id = data.respuesta_id;
-        this.#correcta = data.correcta !== undefined ? data.correcta : false;
-        this.#tiempo_respuesta_seg = data.tiempo_respuesta_seg;
-        this.#puntos_obtenidos = data.puntos_obtenidos || 0;
-        this.#fecha_respuesta = data.fecha_respuesta || new Date();
-    }
-
-    get pregunta_id() { return this.#pregunta_id; }
-    get respuesta_id() { return this.#respuesta_id; }
-    get correcta() { return this.#correcta; }
-    get tiempo_respuesta_seg() { return this.#tiempo_respuesta_seg; }
-    get puntos_obtenidos() { return this.#puntos_obtenidos; }
-    get fecha_respuesta() { return this.#fecha_respuesta; }
-
-    isCorrect() {
-        return this.#correcta === true;
-    }
-
-    isIncorrect() {
-        return this.#correcta === false;
-    }
-
-    isFastAnswer() {
-        return this.#tiempo_respuesta_seg && this.#tiempo_respuesta_seg < 10;
-    }
-
-    getPoints() {
-        return this.#puntos_obtenidos;
-    }
-
-    toObject() {
-        return {
-            pregunta_id: this.#pregunta_id,
-            respuesta_id: this.#respuesta_id,
-            correcta: this.#correcta,
-            tiempo_respuesta_seg: this.#tiempo_respuesta_seg,
-            puntos_obtenidos: this.#puntos_obtenidos,
-            fecha_respuesta: this.#fecha_respuesta
-        };
-    }
-
-    static create(preguntaId, respuestaId, correcta, puntos, tiempoSeg) {
-        return new AnswerHistory({
-            pregunta_id: preguntaId,
-            respuesta_id: respuestaId,
-            correcta,
-            puntos_obtenidos: puntos,
-            tiempo_respuesta_seg: tiempoSeg
-        });
-    }
-}
-
 module.exports = {
     Profile,
-    Notification,
-    AnswerHistory
+    Notification
 };

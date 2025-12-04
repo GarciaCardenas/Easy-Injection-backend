@@ -33,50 +33,10 @@ class SeverityLevel extends BaseModel {
         this.#descripcion = plainData.descripcion;
     }
 
-    // Getters y Setters
-    get nombre() {
-        return this.#nombre;
-    }
-
-    set nombre(value) {
-        const validValues = ['Baja', 'Media', 'Alta', 'Crítica'];
-        if (!validValues.includes(value)) {
-            throw new Error(`Nombre de severidad inválido. Debe ser uno de: ${validValues.join(', ')}`);
-        }
-        this.#nombre = value;
-    }
-
-    get descripcion() {
-        return this.#descripcion;
-    }
-
-    set descripcion(value) {
-        if (value && value.length > 255) {
-            throw new Error('La descripción no puede exceder 255 caracteres');
-        }
-        this.#descripcion = value;
-    }
+    get nombre() { return this.#nombre; }
+    get descripcion() { return this.#descripcion; }
 
     // Métodos de dominio
-    getWeight() {
-        const weights = { 'Baja': 1, 'Media': 2, 'Alta': 3, 'Crítica': 4 };
-        return weights[this.#nombre] || 0;
-    }
-
-    isMoreSevereThan(other) {
-        return this.getWeight() > other.getWeight();
-    }
-
-    getColor() {
-        const colors = {
-            'Baja': '#4ecdc4',
-            'Media': '#ffe66d',
-            'Alta': '#ff6b6b',
-            'Crítica': '#c92a2a'
-        };
-        return colors[this.#nombre] || '#gray';
-    }
-
     isCritical() {
         return this.#nombre === 'Crítica';
     }

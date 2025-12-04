@@ -28,28 +28,8 @@ class GestorBD extends BaseModel {
         this.#descripcion = plainData.descripcion;
     }
 
-    get nombre() {
-        return this.#nombre;
-    }
-
-    set nombre(value) {
-        const validValues = ['dalfox', 'sqlmap', 'zap', 'otros'];
-        if (!validValues.includes(value)) {
-            throw new Error(`Gestor de BD inválido. Debe ser uno de: ${validValues.join(', ')}`);
-        }
-        this.#nombre = value;
-    }
-
-    get descripcion() {
-        return this.#descripcion;
-    }
-
-    set descripcion(value) {
-        if (value && value.length > 255) {
-            throw new Error('La descripción no puede exceder 255 caracteres');
-        }
-        this.#descripcion = value;
-    }
+    get nombre() { return this.#nombre; }
+    get descripcion() { return this.#descripcion; }
 
     // Métodos de dominio
     getFullName() {
@@ -60,38 +40,6 @@ class GestorBD extends BaseModel {
             'otros': 'Otros Gestores'
         };
         return names[this.#nombre] || this.#nombre;
-    }
-
-    isAutomatedScanner() {
-        return ['dalfox', 'sqlmap', 'zap'].includes(this.#nombre);
-    }
-
-    supportsXSS() {
-        return ['dalfox', 'zap'].includes(this.#nombre);
-    }
-
-    supportsSQLi() {
-        return ['sqlmap', 'zap'].includes(this.#nombre);
-    }
-
-    getVulnerabilityTypes() {
-        const types = {
-            'dalfox': ['XSS'],
-            'sqlmap': ['SQLi'],
-            'zap': ['XSS', 'SQLi', 'CSRF', 'XXE'],
-            'otros': []
-        };
-        return types[this.#nombre] || [];
-    }
-
-    getDefaultTimeout() {
-        const timeouts = {
-            'dalfox': 300,
-            'sqlmap': 600,
-            'zap': 900,
-            'otros': 300
-        };
-        return timeouts[this.#nombre] || 300;
     }
 
     static createEmpty() {

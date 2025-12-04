@@ -12,73 +12,12 @@ class ScanFlags {
     get xss() { return this.#xss; }
     get sqli() { return this.#sqli; }
 
-    hasAnyFlag() {
-        return this.#xss || this.#sqli;
-    }
-
-    hasBothFlags() {
-        return this.#xss && this.#sqli;
-    }
-
-    getEnabledFlags() {
-        const flags = [];
-        if (this.#xss) flags.push('XSS');
-        if (this.#sqli) flags.push('SQLi');
-        return flags;
-    }
-
     toObject() {
         return { xss: this.#xss, sqli: this.#sqli };
     }
 
     static createEmpty() {
         return new ScanFlags({ xss: false, sqli: false });
-    }
-
-    static createXSSOnly() {
-        return new ScanFlags({ xss: true, sqli: false });
-    }
-
-    static createSQLiOnly() {
-        return new ScanFlags({ xss: false, sqli: true });
-    }
-
-    static createBoth() {
-        return new ScanFlags({ xss: true, sqli: true });
-    }
-}
-
-class Credentials {
-    #usuario_login;
-    #password_login;
-
-    constructor(data = {}) {
-        this.#usuario_login = data.usuario_login;
-        this.#password_login = data.password_login;
-    }
-
-    get usuario_login() { return this.#usuario_login; }
-    get password_login() { return this.#password_login; }
-
-    hasCredentials() {
-        return Boolean(this.#usuario_login && this.#password_login);
-    }
-
-    isValid() {
-        return this.hasCredentials() && 
-               this.#usuario_login.length > 0 && 
-               this.#password_login.length > 0;
-    }
-
-    toObject() {
-        return {
-            usuario_login: this.#usuario_login,
-            password_login: this.#password_login
-        };
-    }
-
-    static createEmpty() {
-        return new Credentials({ usuario_login: '', password_login: '' });
     }
 }
 
@@ -102,10 +41,6 @@ class UserAnswer {
     get es_correcta() { return this.#es_correcta; }
     get puntos_obtenidos() { return this.#puntos_obtenidos; }
     get numero_intentos() { return this.#numero_intentos; }
-
-    isCorrect() {
-        return this.#es_correcta === true;
-    }
 
     toObject() {
         return {
@@ -185,26 +120,6 @@ class Score {
         return this.#puntuacion_final;
     }
 
-    addQuestionPoints(points) {
-        this.#puntos_cuestionario += points;
-    }
-
-    setTotalQuestionPoints(total) {
-        this.#total_puntos_cuestionario = total;
-    }
-
-    addVulnerability() {
-        this.#vulnerabilidades_encontradas++;
-    }
-
-    isExcellent() {
-        return this.#calificacion === 'Excelente';
-    }
-
-    isCritical() {
-        return this.#calificacion === 'Crítico';
-    }
-
     toObject() {
         return {
             puntos_cuestionario: this.#puntos_cuestionario,
@@ -228,7 +143,6 @@ class Score {
 
 module.exports = {
     ScanFlags,
-    Credentials,
     UserAnswer,
     Score
 };
