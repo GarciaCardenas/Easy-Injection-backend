@@ -25,6 +25,7 @@ class SqlmapExecutor {
 
         this.tmpDir = config.tmpDir || path.join(os.tmpdir(), 'easyinjection_sqlmap_tmp');
         this.outputDir = config.outputDir || null;
+        this.reportedVulnerabilities = new Set(); // Track vulnerabilidades ya reportadas
     }
 
     async checkAvailability() {
@@ -39,6 +40,20 @@ class SqlmapExecutor {
             if (error.stdout) this.logger.addLog(`stdout: ${error.stdout}`, 'debug');
             if (error.stderr) this.logger.addLog(`stderr: ${error.stderr}`, 'debug');
             return false;
+        }
+    }
+
+    async _gracefulKill(proc, gracePeriod = 300) {
+        try {
+            proc.kill('SIGTERM');
+            await new Promise(resolve => setTimeout(resolve, gracePeriod));
+            
+            if (!proc.killed && proc.exitCode === null) {
+                proc.kill('SIGKILL');
+                this.logger.addLog('Forzando terminación del proceso sqlmap', 'debug');
+            }
+        } catch (error) {
+            this.logger.addLog(`Error al terminar proceso: ${error.message}`, 'warning');
         }
     }
 
@@ -70,11 +85,20 @@ class SqlmapExecutor {
 
         this._addDbmsAndHeaders(args);
 
-        this.logger.addLog(`Ejecutando: sqlmap ${args.join(' ')}`, 'debug', null, true);
+        // Log detallado solo en consola del servidor
+        console.log('\n[SQLmap Crawl] ===== COMANDO CRAWL =====');
+        console.log('[SQLmap Crawl] URL:', this.config.url);
+        console.log('[SQLmap Crawl] Profundidad:', this.toolConfig.crawlDepth);
+        console.log('[SQLmap Crawl] tmp-dir:', this.tmpDir);
+        console.log('[SQLmap Crawl] Args completos:', args);
+        console.log('[SQLmap Crawl] ====================================\n');
 
         return new Promise(async (resolve, reject) => {
             const { executable, args: spawnArgs, spawnOpts } = this.getSpawnCommandForTool(this.toolConfig.path, args);
-            this.logger.addLog(`DEBUG spawn: ${executable} ${spawnArgs.join(' ')}`, 'debug', null, true);
+            
+            console.log('[SQLmap Crawl Spawn] Ejecutable:', executable);
+            console.log('[SQLmap Crawl Spawn] Argumentos:', spawnArgs);
+            console.log('[SQLmap Crawl Spawn] Comando completo:', executable, spawnArgs.join(' '), '\n');
             const proc = spawn(executable, spawnArgs, spawnOpts);
             this.activeProcesses.set('sqlmap-crawl', proc);
 
@@ -82,21 +106,6 @@ class SqlmapExecutor {
             let crawlFinished = false;
             let timeoutTimer = null;
             const finishPattern = /\[?\d{2}:\d{2}:\d{2}\]?.*\[INFO\]\s+found a total of \d+ targets/i;
-            // const finishPattern = /\[\d{2}:\d{2}:\d{2}\]\s+\[INFO\]\s+using\s+['"].+?results-[^'"]+\.csv['"]\s+as the CSV results file in multiple targets mode/i;
-
-            const gracefulKill = async (proc, gracePeriod = 300) => {
-                try {
-                    proc.kill('SIGTERM');
-                    await new Promise(resolve => setTimeout(resolve, gracePeriod));
-                    
-                    if (!proc.killed && proc.exitCode === null) {
-                        proc.kill('SIGKILL');
-                        this.logger.addLog('Forzando terminación del proceso sqlmap', 'debug');
-                    }
-                } catch (error) {
-                    this.logger.addLog(`Error al terminar proceso: ${error.message}`, 'warning');
-                }
-            };
 
             const processCrawlResults = async () => {
                 if (crawlFinished) return;
@@ -113,45 +122,18 @@ class SqlmapExecutor {
                     let csvPath = null;
                     for (let attempt = 0; attempt < 3; attempt++) {
                         csvPath = await this.findCrawlCsv(this.tmpDir);
-                        if (csvPath) {
-                            break;
-                        }
+                        if (csvPath) break;
                         await new Promise(resolve => setTimeout(resolve, 2000));
                     }
                     
                     if (!csvPath) {
                         this.logger.addLog(`⚠ No se encontró CSV de crawling en tmp-dir: ${this.tmpDir}`, 'warning');
-                        try {
-                            const listAllFiles = (dir, fileList = []) => {
-                                const files = fs.readdirSync(dir);
-                                files.forEach(file => {
-                                    const filePath = path.join(dir, file);
-                                    if (fs.statSync(filePath).isDirectory()) {
-                                        listAllFiles(filePath, fileList);
-                                    } else if (file.endsWith('.csv')) {
-                                        fileList.push(filePath);
-                                    }
-                                });
-                                return fileList;
-                            };
-                            const csvFiles = listAllFiles(this.tmpDir);
-                            if (csvFiles.length > 0) {
-                            } else {
-                                this.logger.addLog(`No se encontraron archivos CSV en tmp-dir`, 'debug');
-                            }
-                        } catch (err) {
-                            this.logger.addLog(`Error listando tmp-dir: ${err.message}`, 'debug');
-                        }
                         this.emitter.emit('crawler:failed', { reason: 'CSV not found' });
                         resolve();
                         return;
                     }
 
-
-                    this.emitter.emit('crawler:finished', {
-                        csvPath
-                    });
-
+                    this.emitter.emit('crawler:finished', { csvPath });
                     resolve();
                 } catch (error) {
                     this.logger.addLog(`Error procesando resultados del crawl: ${error.message}`, 'error');
@@ -162,10 +144,10 @@ class SqlmapExecutor {
 
             proc.stdout.on('data', (data) => {
                 const output = data.toString();
-                process.stdout.write(`[sqlmap crawl stdout] ${output}`);
+                // Solo en consola del servidor
+                console.log(`[sqlmap crawl stdout] ${output}`);
                 
                 buffer += output;
-
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
 
@@ -173,9 +155,7 @@ class SqlmapExecutor {
                     if (finishPattern.test(line) && !crawlFinished) {
                         this.logger.addLog('✓ Crawling completado, procesando resultados...', 'success');
                         setTimeout(() => {
-                            gracefulKill(proc).then(() => {
-                                processCrawlResults();
-                            });
+                            this._gracefulKill(proc).then(() => processCrawlResults());
                         }, 1000);
                     }
                 }
@@ -183,19 +163,13 @@ class SqlmapExecutor {
 
             proc.stderr.on('data', (data) => {
                 const error = data.toString();
-                process.stderr.write(`[sqlmap crawl stderr] ${error}`);
-                
-                if (error.trim()) {
-                    this.logger.addLog(`sqlmap stderr: ${error.trim()}`, 'debug', null, true);
-                }
+                // Solo en consola del servidor
+                console.error(`[sqlmap crawl stderr] ${error}`);
             });
 
             proc.on('close', async (code) => {
                 this.activeProcesses.delete('sqlmap-crawl');
-                
-                if (crawlFinished) {
-                    return;
-                }
+                if (crawlFinished) return;
 
                 if (code === 0 || code === null) {
                     await processCrawlResults();
@@ -212,7 +186,7 @@ class SqlmapExecutor {
 
             timeoutTimer = setTimeout(async () => {
                 if (this.activeProcesses.has('sqlmap-crawl') && !crawlFinished) {
-                    await gracefulKill(proc);
+                    await this._gracefulKill(proc);
                     this.logger.addLog('Timeout de crawling alcanzado, intentando procesar resultados...', 'warning');
                     await processCrawlResults();
                 }
@@ -334,6 +308,7 @@ class SqlmapExecutor {
                             endpoint: url,
                             name: paramName,
                             type: method === 'GET' ? 'query' : 'body',
+                            postData: postData || null,
                             testable: true
                         });
                     }
@@ -346,6 +321,7 @@ class SqlmapExecutor {
                                 endpoint: url,
                                 name: paramName,
                                 type: method === 'GET' ? 'query' : 'body',
+                                postData: postData || null,
                                 testable: true
                             });
                         }
@@ -527,6 +503,7 @@ class SqlmapExecutor {
                     endpoint: url,
                     name: '*',
                     type: postData ? 'body' : 'query',
+                    postData: postData || null,
                     testable: true
                 };
 
@@ -545,6 +522,7 @@ class SqlmapExecutor {
                         endpoint: url,
                         name: paramName,
                         type: postData ? 'body' : 'query',
+                        postData: postData || null,
                         testable: true
                     };
 
@@ -584,12 +562,40 @@ class SqlmapExecutor {
     }
 
     async testEndpoint(endpoint, params, phase = 'detection', onVulnerabilityFound) {
-        if (!params || params.length === 0) {
-            return;
-        }
-
-        const paramNames = params.map(p => p.name).join(',');
+        if (!params || params.length === 0) return;
         
+        const paramNames = params.map(p => p.name).join(',');
+        // Extraer postData del primer parámetro (todos los params del mismo endpoint tienen el mismo postData)
+        const postData = params[0]?.postData || null;
+        
+        this.logger.addLog(`Ejecutando sqlmap para endpoint ${endpoint} con parámetros: ${paramNames}${postData ? ' (POST)' : ''}`, 'info');
+        
+        await this._testWithSqlmap({
+            endpoint,
+            paramNames,
+            params,
+            postData,
+            phase,
+            onVulnerabilityFound,
+            processKey: `sqlmap-test-endpoint-${endpoint.replace(/[^a-zA-Z0-9]/g, '_')}-${phase}`,
+            logContext: endpoint
+        });
+    }
+
+    async testParameter(param, phase = 'detection', onVulnerabilityFound) {
+        await this._testWithSqlmap({
+            endpoint: param.endpoint,
+            paramNames: param.name,
+            params: [param],
+            postData: param.postData,
+            phase,
+            onVulnerabilityFound,
+            processKey: `sqlmap-test-${param.name}-${phase}`,
+            logContext: param.name
+        });
+    }
+
+    async _testWithSqlmap({ endpoint, paramNames, params, postData, phase, onVulnerabilityFound, processKey, logContext }) {
         const args = [
             '-u', endpoint,
             '-p', paramNames,
@@ -599,83 +605,78 @@ class SqlmapExecutor {
             '--threads', this.toolConfig.threads.toString()
         ];
 
+        if (postData) args.push('--data', postData);
         this._addDbmsAndHeaders(args);
 
-        if (phase === 'detection') {
-        }
-
-        if (phase === 'fingerprint') {
-            args.push('--fingerprint');
-        }
-
+        if (phase === 'fingerprint') args.push('--fingerprint');
         if (phase === 'exploit') {
-            args.push('--current-db');
-            args.push('--banner');
+            args.push('--current-db', '--banner');
         }
 
-        this.logger.addLog(`Ejecutando sqlmap para endpoint ${endpoint} con parámetros: ${paramNames}`, 'info');
-        this.logger.addLog(`Ejecutando: sqlmap ${args.join(' ')}`, 'debug', null, true);
+        // Log detallado solo en consola del servidor (no en frontend)
+        console.log('\n[SQLmap] ===== COMANDO A EJECUTAR =====');
+        console.log('[SQLmap] Endpoint:', endpoint);
+        console.log('[SQLmap] Parámetros:', paramNames);
+        if (postData) console.log('[SQLmap] POST Data:', postData);
+        console.log('[SQLmap] Fase:', phase);
+        console.log('[SQLmap] Args completos:', args);
+        console.log('[SQLmap] ====================================\n');
 
         return new Promise((resolve) => {
             const { executable, args: spawnArgs, spawnOpts } = this.getSpawnCommandForTool(this.toolConfig.path, args);
-            this.logger.addLog(`DEBUG spawn: ${executable} ${spawnArgs.join(' ')}`, 'debug', null, true);
+            
+            // Log del comando final spawn solo en servidor
+            console.log('[SQLmap Spawn] Ejecutable:', executable);
+            console.log('[SQLmap Spawn] Argumentos:', spawnArgs);
+            console.log('[SQLmap Spawn] Comando completo:', executable, spawnArgs.join(' '));
+            console.log('[SQLmap Spawn] Shell:', spawnOpts.shell, '\n');
+            
             const proc = spawn(executable, spawnArgs, spawnOpts);
-            const processKey = `sqlmap-test-endpoint-${endpoint.replace(/[^a-zA-Z0-9]/g, '_')}-${phase}`;
             this.activeProcesses.set(processKey, proc);
 
             let buffer = '';
-            const foundVulnerabilities = new Map();
+            let csvResultPath = null;
 
             proc.stdout.on('data', (data) => {
                 const output = data.toString();
-                process.stdout.write(`[sqlmap stdout] ${output}`);
+                // Solo en consola del servidor, no en frontend
+                console.log(`[sqlmap stdout] ${output}`);
                 
                 buffer += output;
-
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
 
                 for (const line of lines) {
-                    for (const param of params) {
-                        this._parseTestOutput(line, param, phase);
+                    params.forEach(p => this._parseTestOutput(line, p, phase));
 
-                        if (line.match(/vulnerable|injectable|injection point/i)) {
-                            const paramMentioned = line.includes(param.name) || 
-                                                   line.match(new RegExp(`Parameter:.*${param.name}`, 'i')) ||
-                                                   line.match(new RegExp(`\\[CRITICAL\\].*${param.name}`, 'i'));
-                            
-                            if (paramMentioned && !foundVulnerabilities.has(param.name)) {
-                                foundVulnerabilities.set(param.name, true);
-
-                                let severity = 'critical';
-
-                                if (onVulnerabilityFound) {
-                                    onVulnerabilityFound({
-                                        type: 'SQLi',
-                                        severity: severity,
-                                        endpoint: endpoint,
-                                        parameter: param.name,
-                                        description: `SQL Injection detectada en el parámetro '${param.name}': ${line.trim()}`
-                                    });
-                                }
-                            }
-                        }
+                    const csvMatch = line.match(/you can find results.*inside the CSV file ['"](.+?\.csv)['"]/i);
+                    if (csvMatch) {
+                        csvResultPath = csvMatch[1];
+                        console.log(`[SQLmap] CSV de resultados detectado: ${csvResultPath}`);
                     }
                 }
             });
 
             proc.stderr.on('data', (data) => {
                 const error = data.toString();
-                process.stderr.write(`[sqlmap stderr] ${error}`);
-                
-                if (error.trim()) {
-                    this.logger.addLog(`sqlmap: ${error.trim()}`, 'debug', null, true);
-                }
+                // Solo en consola del servidor, no en frontend
+                console.error(`[sqlmap stderr] ${error}`);
             });
 
-            proc.on('close', () => {
+            proc.on('close', async () => {
                 this.activeProcesses.delete(processKey);
-                this.logger.addLog(`Completado escaneo SQLi para ${endpoint} (${foundVulnerabilities.size} vulnerabilidades encontradas)`, 'info');
+                
+                if (csvResultPath && fs.existsSync(csvResultPath)) {
+                    try {
+                        await this._parseResultsCSV(csvResultPath, onVulnerabilityFound);
+                        this.logger.addLog(`Completado escaneo SQLi para ${logContext}`, 'info');
+                    } catch (error) {
+                        this.logger.addLog(`Error leyendo CSV de resultados: ${error.message}`, 'warning');
+                    }
+                } else {
+                    this.logger.addLog(`Completado escaneo SQLi para ${logContext} (sin CSV de resultados)`, 'info');
+                }
+                
                 resolve();
             });
 
@@ -688,108 +689,7 @@ class SqlmapExecutor {
             setTimeout(() => {
                 if (this.activeProcesses.has(processKey)) {
                     proc.kill('SIGTERM');
-                    this.logger.addLog(`Timeout testeando endpoint ${endpoint}`, 'warning');
-                    resolve();
-                }
-            }, this.toolConfig.timeout * 1000);
-        });
-    }
-
-    async testParameter(param, phase = 'detection', onVulnerabilityFound) {
-        const args = [
-            '-u', param.endpoint,
-            '-p', param.name,
-            '--level', this.toolConfig.level.toString(),
-            '--risk', this.toolConfig.risk.toString(),
-            ...this.toolConfig.commonArgs,
-            '--threads', this.toolConfig.threads.toString()
-        ];
-
-        this._addDbmsAndHeaders(args);
-
-        if (phase === 'detection') {
-        }
-
-        if (phase === 'fingerprint') {
-            args.push('--fingerprint');
-        }
-
-        if (phase === 'exploit') {
-            args.push('--current-db');
-            args.push('--banner');
-        }
-
-        this.logger.addLog(`Ejecutando: sqlmap ${args.join(' ')}`, 'debug', null, true);
-
-        return new Promise((resolve) => {
-            const { executable, args: spawnArgs, spawnOpts } = this.getSpawnCommandForTool(this.toolConfig.path, args);
-            this.logger.addLog(`DEBUG spawn: ${executable} ${spawnArgs.join(' ')}`, 'debug', null, true);
-            const proc = spawn(executable, spawnArgs, spawnOpts);
-            const processKey = `sqlmap-test-${param.name}-${phase}`;
-            this.activeProcesses.set(processKey, proc);
-
-            let buffer = '';
-            let vulnerabilityFound = false;
-
-            proc.stdout.on('data', (data) => {
-                const output = data.toString();
-                process.stdout.write(`[sqlmap stdout] ${output}`);
-                
-                buffer += output;
-
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    this._parseTestOutput(line, param, phase);
-
-                    if (line.match(/vulnerable|injectable|injection point/i) && !vulnerabilityFound) {
-                        vulnerabilityFound = true;
-
-                        let severity = 'critical';
-                        if (line.match(/time-based|stacked queries/i)) {
-                            severity = 'critical';
-                        } else if (line.match(/union|error-based/i)) {
-                            severity = 'critical';
-                        }
-
-                        if (onVulnerabilityFound) {
-                            onVulnerabilityFound({
-                                type: 'SQLi',
-                                severity: severity,
-                                endpoint: param.endpoint,
-                                parameter: param.name,
-                                description: `SQL Injection detectada en el parámetro '${param.name}': ${line.trim()}`
-                            });
-                        }
-                    }
-                }
-            });
-
-            proc.stderr.on('data', (data) => {
-                const error = data.toString();
-                process.stderr.write(`[sqlmap stderr] ${error}`);
-                
-                if (error.trim()) {
-                    this.logger.addLog(`sqlmap: ${error.trim()}`, 'debug', null, true);
-                }
-            });
-
-            proc.on('close', () => {
-                this.activeProcesses.delete(processKey);
-                resolve();
-            });
-
-            proc.on('error', (error) => {
-                this.activeProcesses.delete(processKey);
-                this.logger.addLog(`Error ejecutando sqlmap: ${error.message}`, 'error');
-                resolve();
-            });
-
-            setTimeout(() => {
-                if (this.activeProcesses.has(processKey)) {
-                    proc.kill('SIGTERM');
-                    this.logger.addLog(`Timeout testeando ${param.name}`, 'warning');
+                    this.logger.addLog(`Timeout testeando ${logContext}`, 'warning');
                     resolve();
                 }
             }, this.toolConfig.timeout * 1000);
@@ -797,53 +697,151 @@ class SqlmapExecutor {
     }
 
     _parseTestOutput(line, param, phase) {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-
-        if (trimmed.match(/^[_\-\|\[\]H\s]+$/) || 
-            trimmed.match(/^[_\-\|\[\]H]+$/) ||
-            trimmed.match(/^\{1\.\d+\.\d+\.\d+/) ||
-            trimmed.match(/^https:\/\/sqlmap\.org/) ||
-            trimmed.match(/^legal disclaimer/i) ||
-            trimmed.match(/^Usage of sqlmap/i) ||
-            trimmed.match(/^\[!\] legal disclaimer/i) ||
-            trimmed.match(/^\[.*\] legal disclaimer/i) ||
-            trimmed.match(/^Press Enter to continue/i) ||
-            trimmed.match(/^please enter/i) ||
-            trimmed.match(/^\[.*\] starting @/i) ||
-            trimmed.match(/^\[.*\] ending @/i) ||
-            trimmed.match(/^\[.*\] using '.+' as the temporary directory/i) ||
-            trimmed.match(/^\[.*\] fetched random HTTP User-Agent/i) ||
-            trimmed.match(/^\[.*\] using '.+' as the CSV results file/i) ||
-            trimmed.match(/^\[.*\] testing connection to the target URL/i) ||
-            trimmed.match(/^\[.*\] WARNING\] running in a single-thread/i) ||
-            // trimmed.match(/^\[.*\] searching for links/i) ||
-            trimmed.match(/^\[.*\] starting crawler/i) ||
-            trimmed.match(/^\[.*\] found a total of \d+ targets/i) ||
-            trimmed.match(/^> Y$/i) ||
-            trimmed.match(/^> \d+$/i) ||
-            trimmed.match(/^> q$/i) ||
-            trimmed.match(/^> [a-z]$/i) ||
-            trimmed.match(/^Edit POST data/i) ||
-            trimmed.match(/^there were multiple injection points/i) ||
-            trimmed.match(/^\[0\] place:/i) ||
-            trimmed.match(/^\[1\] place:/i) ||
-            trimmed.match(/^\[q\] Quit/i) ||
-            trimmed.match(/^\[.*\] INFO\] resuming back-end DBMS/i)) {
-            return;
-        }
-
+        // Log informativo relevante (los resultados reales vienen del CSV)
         if (line.match(/Parameter:.*vulnerable/i)) {
             this.logger.addLog(`✓ ${line.trim()}`, 'success');
-        }
-
-        if (line.match(/back-end DBMS/i)) {
+        } else if (line.match(/back-end DBMS/i)) {
             this.logger.addLog(`DBMS identificado: ${line.trim()}`, 'success');
-        }
-
-        if (line.match(/injection type:/i)) {
+        } else if (line.match(/injection type:/i)) {
             this.logger.addLog(`Tipo de inyección: ${line.trim()}`, 'info');
         }
+    }
+
+    async _parseResultsCSV(csvPath, onVulnerabilityFound) {
+        try {
+            const content = fs.readFileSync(csvPath, 'utf-8');
+            const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+            
+            if (lines.length < 2) {
+                this.logger.addLog('CSV de resultados vacío o sin datos', 'debug');
+                return;
+            }
+
+            // Primera línea es el header: Target URL, Place, Parameter, Technique(s), Note(s)
+            const header = lines[0];
+            this.logger.addLog(`CSV Header: ${header}`, 'debug');
+
+            // Procesar cada línea de resultados
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line) continue;
+
+                // Parsear CSV considerando que puede haber comas dentro de comillas
+                const columns = this._parseCSVLine(line);
+                
+                if (columns.length < 4) {
+                    this.logger.addLog(`Línea CSV inválida: ${line}`, 'debug');
+                    continue;
+                }
+
+                const [targetUrl, place, parameter, techniques, notes] = columns;
+
+                // Si tiene técnicas detectadas, es vulnerable
+                if (techniques && techniques.trim() && techniques.trim() !== '' && techniques.trim() !== '-') {
+                    // Crear ID único para esta vulnerabilidad
+                    const vulnId = `${targetUrl}|${place}|${parameter}|${techniques}`;
+                    
+                    // Verificar si ya fue reportada
+                    if (this.reportedVulnerabilities.has(vulnId)) {
+                        this.logger.addLog(`Vulnerabilidad duplicada omitida: ${targetUrl} - ${parameter}`, 'debug');
+                        continue;
+                    }
+                    
+                    // Marcar como reportada
+                    this.reportedVulnerabilities.add(vulnId);
+                    
+                    // Traducir técnicas de letras a nombres completos
+                    const translatedTechniques = this._translateTechniques(techniques);
+                    const severity = this._determineSeverityFromTechnique(techniques);
+                    
+                    this.logger.addLog(`✓ Vulnerabilidad SQLi encontrada: ${targetUrl} - ${parameter} (${translatedTechniques})`, 'success');
+
+                    if (onVulnerabilityFound) {
+                        onVulnerabilityFound({
+                            type: 'SQLi',
+                            severity: severity,
+                            endpoint: targetUrl,
+                            parameter: parameter || 'unknown',
+                            description: `SQL Injection detectada - Place: ${place}, Technique: ${translatedTechniques}${notes ? `, Notes: ${notes}` : ''}`
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            this.logger.addLog(`Error parseando CSV: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    _parseCSVLine(line) {
+        const columns = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            
+            if (char === '"') {
+                inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+                columns.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        
+        // Agregar última columna
+        columns.push(current.trim());
+        
+        return columns;
+    }
+
+    _translateTechniques(techniques) {
+        if (!techniques) return techniques;
+        
+        const techMap = {
+            'B': 'Boolean-based blind',
+            'E': 'Error-based',
+            'U': 'Union query-based',
+            'S': 'Stacked queries',
+            'T': 'Time-based blind',
+            'Q': 'Inline queries'
+        };
+        
+        // Separar por comas y traducir cada técnica
+        const parts = techniques.split(',').map(t => t.trim());
+        const translated = parts.map(tech => {
+            // Si es una sola letra, traducir
+            if (tech.length === 1 && techMap[tech]) {
+                return techMap[tech];
+            }
+            return tech;
+        });
+        
+        return translated.join(', ');
+    }
+
+    _determineSeverityFromTechnique(techniques) {
+        const techLower = techniques.toLowerCase();
+        
+        // Técnicas más peligrosas
+        if (techLower.includes('time-based') || techLower.includes('stacked')) {
+            return 'critical';
+        }
+        
+        // Técnicas que permiten extracción directa
+        if (techLower.includes('union') || techLower.includes('error-based')) {
+            return 'critical';
+        }
+        
+        // Boolean-based es también crítico pero ligeramente menos directo
+        if (techLower.includes('boolean')) {
+            return 'critical';
+        }
+        
+        // Cualquier otra técnica detectada
+        return 'critical';
     }
 
     _addDbmsAndHeaders(args) {
@@ -883,133 +881,85 @@ class SqlmapExecutor {
     }
 
     async runCommand(args, timeout = 30000, opts = {}) {
-        return new Promise((resolve, reject) => {
-        const autoRespond = (typeof opts.autoRespond === 'boolean') ? opts.autoRespond : true;
+        const autoRespond = opts.autoRespond !== false;
         const autoRespondRegex = opts.autoRespondRegex || /press\s+(enter|any key|return)\b/i;
-        const useShellFallback = (typeof opts.useShellFallback === 'boolean') ? opts.useShellFallback : true;
+        const useShellFallback = opts.useShellFallback !== false;
     
         const { executable, args: finalArgs, spawnOpts } = this.getSpawnCommandForTool(this.toolConfig.path, Array.isArray(args) ? args.slice() : []);
-    
         this.logger.addLog(`Ejecutando comando: ${executable} ${finalArgs.join(' ')}`, 'debug', null, true);
     
-        let stdout = '';
-        let stderr = '';
-        let responded = false;
-        let finished = false;
-    
-        const proc = spawn(executable, finalArgs, spawnOpts);
-    
-        const timer = setTimeout(() => {
-            if (finished) return;
-            finished = true;
-            try { proc.kill(); } catch (e) {}
-            reject({ message: 'Command timeout', stdout, stderr });
-        }, timeout);
-    
-        const tryAutoRespond = (text, targetProc) => {
-            if (!autoRespond || responded) return;
-            try {
-            if (autoRespondRegex.test(text) && targetProc.stdin && !targetProc.stdin.destroyed) {
-                targetProc.stdin.write('\n');
-                try { targetProc.stdin.end(); } catch (_) {}
-                responded = true;
-            }
-            } catch (e) {
-            this.logger.addLog(`Auto-respond failed: ${e.message}`, 'debug');
-            }
-        };
-    
-        proc.stdout.on('data', (d) => {
-            const t = d.toString();
-            stdout += t;
-            tryAutoRespond(t, proc);
-        });
-    
-        proc.stderr.on('data', (d) => {
-            const t = d.toString();
-            stderr += t;
-            tryAutoRespond(t, proc);
-        });
-    
-        proc.on('close', (code) => {
-            if (finished) return;
-            finished = true;
-            clearTimeout(timer);
-    
-            if (code === 0) {
-            return resolve({ stdout, stderr });
-            }
-    
+        try {
+            return await this._executeProcess(executable, finalArgs, spawnOpts, timeout, autoRespond, autoRespondRegex);
+        } catch (error) {
             if (useShellFallback && !spawnOpts.shell) {
-            const safeArgs = finalArgs.map(a => typeof a === 'string' && a.includes(' ') ? `"${a}"` : a).join(' ');
-            const shellCmd = `${executable} ${safeArgs}`;
-            this.logger.addLog(`Fallback ejecutando en shell: ${shellCmd}`, 'debug');
+                const safeArgs = finalArgs.map(a => typeof a === 'string' && a.includes(' ') ? `"${a}"` : a).join(' ');
+                const shellCmd = `${executable} ${safeArgs}`;
+                this.logger.addLog(`Fallback ejecutando en shell: ${shellCmd}`, 'debug');
+                return await this._executeProcess(shellCmd, [], { shell: true }, timeout, autoRespond, autoRespondRegex);
+            }
+            throw error;
+        }
+    }
+
+    _executeProcess(executable, args, spawnOpts, timeout, autoRespond, autoRespondRegex) {
+        return new Promise((resolve, reject) => {
+            let stdout = '';
+            let stderr = '';
+            let responded = false;
+            let finished = false;
     
-            const fallback = spawn(shellCmd, { shell: true });
+            const proc = spawn(executable, args, spawnOpts);
     
-            let fStdout = '';
-            let fStderr = '';
-            let fResponded = false;
-            let fFinished = false;
-    
-            const fTimer = setTimeout(() => {
-                if (fFinished) return;
-                fFinished = true;
-                try { fallback.kill(); } catch (e) {}
-                reject({ message: 'Fallback timeout', stdout: fStdout, stderr: fStderr });
+            const timer = setTimeout(() => {
+                if (finished) return;
+                finished = true;
+                try { proc.kill(); } catch (e) {}
+                reject({ message: 'Command timeout', stdout, stderr });
             }, timeout);
     
-            const tryAutoRespondFallback = (text) => {
-                if (!autoRespond || fResponded) return;
+            const tryAutoRespond = (text) => {
+                if (!autoRespond || responded) return;
                 try {
-                if (autoRespondRegex.test(text) && fallback.stdin && !fallback.stdin.destroyed) {
-                    fallback.stdin.write('\n');
-                    try { fallback.stdin.end(); } catch (_) {}
-                    fResponded = true;
-                }
+                    if (autoRespondRegex.test(text) && proc.stdin && !proc.stdin.destroyed) {
+                        proc.stdin.write('\n');
+                        try { proc.stdin.end(); } catch (_) {}
+                        responded = true;
+                    }
                 } catch (e) {
-                this.logger.addLog(`Fallback auto respondido falló: ${e.message}`, 'debug');
+                    this.logger.addLog(`Auto-respond failed: ${e.message}`, 'debug');
                 }
             };
     
-            fallback.stdout.on('data', d => {
+            proc.stdout.on('data', (d) => {
                 const t = d.toString();
-                fStdout += t;
-                tryAutoRespondFallback(t);
+                stdout += t;
+                tryAutoRespond(t);
             });
-            fallback.stderr.on('data', d => {
+    
+            proc.stderr.on('data', (d) => {
                 const t = d.toString();
-                fStderr += t;
-                tryAutoRespondFallback(t);
+                stderr += t;
+                tryAutoRespond(t);
             });
     
-            fallback.on('close', (fcode) => {
-                if (fFinished) return;
-                fFinished = true;
-                clearTimeout(fTimer);
-                if (fcode === 0) resolve({ stdout: fStdout, stderr: fStderr });
-                else reject({ message: `Fallback failed with code ${fcode}`, stdout: fStdout, stderr: fStderr });
+            proc.on('close', (code) => {
+                if (finished) return;
+                finished = true;
+                clearTimeout(timer);
+    
+                if (code === 0) {
+                    resolve({ stdout, stderr });
+                } else {
+                    reject({ message: `Command failed with code ${code}`, stdout, stderr });
+                }
             });
     
-            fallback.on('error', (err) => {
-                if (fFinished) return;
-                fFinished = true;
-                clearTimeout(fTimer);
-                reject({ message: `Fallback error: ${err.message}`, stdout, stderr: stderr + err.message });
+            proc.on('error', (err) => {
+                if (finished) return;
+                finished = true;
+                clearTimeout(timer);
+                reject({ message: err.message, stdout, stderr });
             });
-    
-            return;
-            }
-    
-            reject({ message: `Command failed with code ${code}`, stdout, stderr });
-        });
-    
-        proc.on('error', (err) => {
-            if (finished) return;
-            finished = true;
-            clearTimeout(timer);
-            reject({ message: err.message, stdout, stderr });
-        });
         });
     }  
 }
