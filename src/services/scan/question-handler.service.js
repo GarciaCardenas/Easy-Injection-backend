@@ -31,7 +31,7 @@ class QuestionHandler {
             }
             
             if (questions.length === 0) {
-                this.logger.addLog(`No questions found for phase: ${phase}`, 'warning');
+                this.logger.addLog(`No se encontraron preguntas para la fase: ${phase}`, 'warning');
                 return null;
             }
             
@@ -41,7 +41,7 @@ class QuestionHandler {
             const answers = await Answer.Model.find({ pregunta_id: question._id }).sort({ es_correcta: -1 });
             
             if (answers.length === 0) {
-                this.logger.addLog(`No answers found for question: ${question.texto_pregunta}`, 'warning');
+                this.logger.addLog(`No se encontraron respuestas para la pregunta: ${question.texto_pregunta}`, 'warning');
                 return null;
             }
             
@@ -60,14 +60,14 @@ class QuestionHandler {
                 answerIds: shuffledAnswers.map(a => a._id)
             };
         } catch (error) {
-            this.logger.addLog(`Error fetching question from database: ${error.message}`, 'error');
+            this.logger.addLog(`Error obteniendo pregunta de la base de datos: ${error.message}`, 'error');
             return null;
         }
     }
 
     async askQuestion(questionData = null, phase = null) {
         this.isPaused = true;
-        this.logger.addLog('⏸ Scan paused - Theory question', 'info');
+        this.logger.addLog('⏸ Escaneo pausado - Pregunta teórica', 'info');
         
         let questionToAsk;
         
@@ -76,12 +76,12 @@ class QuestionHandler {
         } else if (phase) {
             questionToAsk = await this.getRandomQuestionByPhase(phase);
             if (!questionToAsk) {
-                this.logger.addLog('Could not fetch question from database', 'error');
+                this.logger.addLog('No se pudo obtener pregunta de la base de datos', 'error');
                 this.isPaused = false;
                 return;
             }
         } else {
-            this.logger.addLog('Error: Must provide questionData or phase', 'error');
+            this.logger.addLog('Error: Debe proporcionar questionData o phase', 'error');
             this.isPaused = false;
             return;
         }
@@ -124,7 +124,7 @@ class QuestionHandler {
                 });
                 
                 if (isCorrect) {
-                    this.logger.addLog(`✓ Correct answer on attempt ${currentAttempts}! Points earned: ${pointsEarned}. Continuing scan...`, 'success');
+                    this.logger.addLog(`✓ Respuesta correcta en el intento ${currentAttempts}! Puntos obtenidos: ${pointsEarned}. Continuando escaneo...`, 'success');
                     this.isPaused = false;
                     
                     this.emitter.off('question:answered', answerHandler);
@@ -136,7 +136,7 @@ class QuestionHandler {
                     
                     resolve();
                 } else {
-                    this.logger.addLog(`✗ Incorrect answer (attempt ${currentAttempts}). Waiting for correct answer...`, 'warning');
+                    this.logger.addLog(`✗ Respuesta incorrecta (intento ${currentAttempts}). Esperando la respuesta correcta...`, 'warning');
                 }
             };
             

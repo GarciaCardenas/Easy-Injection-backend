@@ -131,7 +131,7 @@ class ScanOrchestrator extends EventEmitter {
             }
         } catch (error) {
             if (!this.isStopped) {
-                this.logger.addLog(`Critical error: ${error.message}`, 'error');
+                this.logger.addLog(`Error crítico: ${error.message}`, 'error');
                 this.emit('scan:error', { scanId: this.scanId, error: error.message });
             }
             this.killAllProcesses();
@@ -140,7 +140,7 @@ class ScanOrchestrator extends EventEmitter {
     }
 
     async waitForAllProcesses() {
-        this.logger.addLog('Waiting for all processes to finish...', 'info');
+        this.logger.addLog('Esperando que finalicen todos los procesos...', 'info');
         
         const maxWaitTime = 60000;
         const checkInterval = 1000;
@@ -152,16 +152,16 @@ class ScanOrchestrator extends EventEmitter {
         }
         
         if (this.activeProcesses.size > 0) {
-            this.logger.addLog(`Warning: ${this.activeProcesses.size} process(es) still active after max wait time`, 'warning');
+            this.logger.addLog(`Advertencia: ${this.activeProcesses.size} proceso(s) aún activos después del tiempo máximo de espera`, 'warning');
         } else {
-            this.logger.addLog('All processes have finished', 'success');
+            this.logger.addLog('Todos los procesos han finalizado', 'success');
         }
     }
     
     killAllProcesses() {
         for (const [name, proc] of this.activeProcesses.entries()) {
             if (proc && !proc.killed) {
-                this.logger.addLog(`Terminating process: ${name}`, 'warning');
+                this.logger.addLog(`Terminando proceso: ${name}`, 'warning');
                 proc.kill('SIGTERM');
             }
         }
@@ -178,7 +178,7 @@ class ScanOrchestrator extends EventEmitter {
         this.logger.setCurrentPhase(phaseId);
         phase.status = 'running';
         this.emit('phase:started', { phase: phaseId, name: phase.name });
-        this.logger.addLog(`Starting phase: ${phase.name}`, 'info', phaseId);
+        this.logger.addLog(`Iniciando fase: ${phase.name}`, 'info', phaseId);
 
         try {
             switch (phaseId) {
@@ -212,16 +212,16 @@ class ScanOrchestrator extends EventEmitter {
         if (!this.isStopped) {
             phase.status = 'completed';
             this.emit('phase:completed', { phase: phaseId, name: phase.name });
-            this.logger.addLog(`Phase completed: ${phase.name}`, 'success', phaseId);
+            this.logger.addLog(`Fase completada: ${phase.name}`, 'success', phaseId);
         }
     }
 
     async initializeScan() {
         await this.questionHandler.waitIfPaused();
         
-        this.logger.addLog('Validating scan configuration...', 'info');
-        this.logger.addLog(`Target URL: ${this.config.url}`, 'info');
-        this.logger.addLog(`Active flags: SQLi=${this.config.flags.sqli}, XSS=${this.config.flags.xss}`, 'info');
+        this.logger.addLog('Validando configuración del escaneo...', 'info');
+        this.logger.addLog(`URL objetivo: ${this.config.url}`, 'info');
+        this.logger.addLog(`Flags activas: SQLi=${this.config.flags.sqli}, XSS=${this.config.flags.xss}`, 'info');
         
         await this.sqlmapExecutor.checkAvailability();
         if (this.config.flags.xss) {
@@ -232,7 +232,7 @@ class ScanOrchestrator extends EventEmitter {
         
         await this.questionHandler.askQuestion(null, 'init');
         
-        this.logger.addLog('Initialization completed', 'success');
+        this.logger.addLog('Inicialización completada', 'success');
     }
 
     async runDiscoveryPhase() {
@@ -255,7 +255,7 @@ class ScanOrchestrator extends EventEmitter {
             this.vulnerabilities.push(vuln);
             this.stats.vulnerabilitiesFound++;
             this.emit('vulnerability:found', vuln);
-            this.logger.addLog(`Vulnerability found: ${vuln.type} at ${vuln.endpoint}`, 'success');
+            this.logger.addLog(`Vulnerabilidad encontrada: ${vuln.type} en ${vuln.endpoint}`, 'success');
         }
     }
 
@@ -306,7 +306,7 @@ class ScanOrchestrator extends EventEmitter {
         
         this.isPaused = true;
         this.questionHandler.isPaused = true;
-        this.logger.addLog('Scan paused by user', 'warning');
+        this.logger.addLog('Escaneo pausado por el usuario', 'warning');
         this.emit('scan:paused', { scanId: this.scanId });
     }
 
@@ -319,7 +319,7 @@ class ScanOrchestrator extends EventEmitter {
             this.questionHandler.pauseResolver();
             this.questionHandler.pauseResolver = null;
         }
-        this.logger.addLog('Scan resumed', 'info');
+        this.logger.addLog('Escaneo reanudado', 'info');
         this.emit('scan:resumed', { scanId: this.scanId });
     }
 
@@ -334,7 +334,7 @@ class ScanOrchestrator extends EventEmitter {
             this.questionHandler.pauseResolver = null;
         }
         
-        this.logger.addLog('Scan stopped by user', 'warning');
+        this.logger.addLog('Escaneo detenido por el usuario', 'warning');
         this.killAllProcesses();
         this.emit('scan:stopped', { scanId: this.scanId });
     }

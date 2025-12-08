@@ -134,7 +134,34 @@ router.get('/:id/report', auth, async (req, res) => {
                 severityCounts.baja++;
             }
             
-            return vuln.toDTO(severityLevel, vulnerabilityType);
+            const dto = vuln.toDTO(severityLevel, vulnerabilityType);
+            
+            // Para SQLi, extraer el subtipo de técnica de la descripción si existe
+            if (vulnerabilityType?.nombre === 'SQLi' && vuln.descripcion) {
+                // Buscar patrones de técnicas en la descripción
+                const techniquePatterns = [
+                    'Inyección ciega basada en booleanos (Boolean-based blind)',
+                    'Basada en errores (Error-based)',
+                    'Basada en consultas UNION (Union query-based)',
+                    'Consultas apiladas (Stacked queries)',
+                    'Inyección ciega basada en tiempo (Time-based blind)',
+                    'Consultas en línea (Inline queries)'
+                ];
+                
+                for (const pattern of techniquePatterns) {
+                    if (vuln.descripcion.includes(pattern)) {
+                        // Crear un objeto tipo_id modificado solo para este DTO
+                        dto.tipo_id = {
+                            _id: vulnerabilityType._id,
+                            nombre: vulnerabilityType.nombre,
+                            descripcion: pattern
+                        };
+                        break;
+                    }
+                }
+            }
+            
+            return dto;
         });
 
         const quizResults = [];

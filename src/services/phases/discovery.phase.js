@@ -99,10 +99,10 @@ class DiscoveryPhase {
             this.logger.addLog(`✓ Procesados ${result.endpoints.length} endpoint(s) y ${result.parameters.length} parámetro(s) del CSV`, 'success');
             
             if (targetsResult) {
-                this.logger.addLog(`✓ Archivos targets.txt generados: ${targetsResult.getCount} GET, ${targetsResult.postCount} POST`, 'debug');
+                console.log(`✓ Archivos targets.txt generados: ${targetsResult.getCount} GET, ${targetsResult.postCount} POST`, 'debug');
             }
         } catch (error) {
-            this.logger.addLog(`Error procesando CSV: ${error.message}`, 'error');
+            console.log(`Error procesando CSV: ${error.message}`, 'error');
             throw error;
         }
     }

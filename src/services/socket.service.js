@@ -417,7 +417,7 @@ class SocketService {
                     url_afectada: vuln.endpoint || null,
                     descripcion: vuln.description || `Vulnerabilidad ${typeName} detectada`,
                     sugerencia: this._getVulnerabilitySuggestion(typeName),
-                    referencia: null
+                    referencia: this._getVulnerabilityReferences(typeName)
                 });
 
                 await vulnerability.save();
@@ -520,13 +520,21 @@ class SocketService {
 
     _getVulnerabilitySuggestion(type) {
         const suggestions = {
-            'SQLi': 'Utilice consultas preparadas (prepared statements) o parámetros parametrizados para prevenir inyecciones SQL. Valide y sanitice toda la entrada del usuario.',
+            'SQLi': '- Usa consultas parametrizadas o prepared statements. Este enfoque garantiza que la entrada del usuario siempre sea tratada como datos, no como comandos SQL ejecutables.\n- Aplica reglas estrictas de listas blancas (whitelists) basadas en los requisitos específicos de cada campo. Por ejemplo, para un nombre de usuario, esto implicaría restringir la entrada a un conjunto definido de caracteres y una longitud permitida (por ejemplo, 3–20 caracteres alfanuméricos).\n- La cuenta de la base de datos utilizada por la aplicación debe operar con los mínimos privilegios necesarios, típicamente limitada a operaciones SELECT e INSERT sobre tablas específicas. Esta estrategia de contención limita el daño potencial si ocurriera un ataque exitoso de inyección.',
             'XSS': 'Implemente validación de entrada y escapado de salida. Use Content Security Policy (CSP) y considere sanitizar el contenido HTML antes de mostrarlo.',
             'CSRF': 'Implemente tokens CSRF (tokens sincronizadores) y verifique el origen de las peticiones.',
             'XXE': 'Deshabilite el procesamiento de entidades externas XML. Use procesadores XML seguros que no procesen DTDs externos.',
             'SSTI': 'Evite usar motores de plantillas que evalúen código arbitrario. Use motores de plantillas seguros o sanitice las plantillas.'
         };
         return suggestions[type] || 'Revise y corrija la vulnerabilidad siguiendo las mejores prácticas de seguridad.';
+    }
+
+    _getVulnerabilityReferences(type) {
+        const references = {
+            'SQLi': 'OWASP - SQL Injection\nhttps://owasp.org/www-community/attacks/SQL_Injection\n\nOWASP - Query Parametrization Cheat Sheet\nhttps://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html\n\nOWASP - Input Validation Cheat Sheet\nhttps://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html',
+            'XSS': 'OWASP - Cross Site Scripting (XSS)\nhttps://owasp.org/www-community/attacks/xss/\n\nOWASP - XSS Prevention Cheat Sheet\nhttps://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html'
+        };
+        return references[type] || null;
     }
 }
 

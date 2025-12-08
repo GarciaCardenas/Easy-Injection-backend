@@ -364,11 +364,11 @@ class SqlmapExecutor {
 
         const getTargetsPath = path.join(outputDir, 'get_targets.txt');
         fs.writeFileSync(getTargetsPath, getTargets.join('\n') + (getTargets.length > 0 ? '\n' : ''), 'utf-8');
-        this.logger.addLog(`✓ get_targets.txt generado: ${getTargets.length} targets`, 'debug');
+        console.log(`✓ get_targets.txt generado: ${getTargets.length} targets`, 'debug');
 
         const postTargetsPath = path.join(outputDir, 'post_targets.txt');
         fs.writeFileSync(postTargetsPath, postTargets.join('\n') + (postTargets.length > 0 ? '\n' : ''), 'utf-8');
-        this.logger.addLog(`✓ post_targets.txt generado: ${postTargets.length} targets`, 'debug');
+        console.log(`✓ post_targets.txt generado: ${postTargets.length} targets`, 'debug');
 
         return {
             getTargetsPath,
@@ -380,7 +380,7 @@ class SqlmapExecutor {
 
     async processGetTargets(getTargetsPath, onEndpointDiscovered, onVulnerabilityFound, options = {}) {
         if (!fs.existsSync(getTargetsPath)) {
-            this.logger.addLog(`get_targets.txt no encontrado: ${getTargetsPath}`, 'warning');
+            console.log(`get_targets.txt no encontrado: ${getTargetsPath}`, 'warning');
             return;
         }
 
@@ -425,7 +425,7 @@ class SqlmapExecutor {
 
     async processPostTargets(postTargetsPath, onEndpointDiscovered, onVulnerabilityFound, options = {}) {
         if (!fs.existsSync(postTargetsPath)) {
-            this.logger.addLog(`post_targets.txt no encontrado: ${postTargetsPath}`, 'warning');
+            console.log(`post_targets.txt no encontrado: ${postTargetsPath}`, 'warning');
             return;
         }
 
@@ -636,11 +636,16 @@ class SqlmapExecutor {
 
             let buffer = '';
             let csvResultPath = null;
+            let fullOutput = ''; // Capturar toda la salida para extraer POC
+            let pocData = null; // Almacenar datos del POC
 
             proc.stdout.on('data', (data) => {
                 const output = data.toString();
                 // Solo en consola del servidor, no en frontend
                 console.log(`[sqlmap stdout] ${output}`);
+                
+                // Capturar toda la salida para extraer POC
+                fullOutput += output;
                 
                 buffer += output;
                 const lines = buffer.split('\n');
@@ -666,9 +671,12 @@ class SqlmapExecutor {
             proc.on('close', async () => {
                 this.activeProcesses.delete(processKey);
                 
+                // Extraer POC de la salida completa
+                pocData = this._extractPOCFromOutput(fullOutput);
+                
                 if (csvResultPath && fs.existsSync(csvResultPath)) {
                     try {
-                        await this._parseResultsCSV(csvResultPath, onVulnerabilityFound);
+                        await this._parseResultsCSV(csvResultPath, onVulnerabilityFound, pocData);
                         this.logger.addLog(`Completado escaneo SQLi para ${logContext}`, 'info');
                     } catch (error) {
                         this.logger.addLog(`Error leyendo CSV de resultados: ${error.message}`, 'warning');
@@ -707,13 +715,39 @@ class SqlmapExecutor {
         }
     }
 
-    async _parseResultsCSV(csvPath, onVulnerabilityFound) {
+    _extractPOCFromOutput(output) {
+        // Buscar el patrón de POC en la salida de SQLmap
+        const pocPattern = /Parameter:\s+([^\n]+)\s+Type:\s+([^\n]+)\s+Title:\s+([^\n]+)\s+Payload:\s+([^\n]+)/gi;
+        const pocs = [];
+        
+        // Extraer información del DBMS
+        let dbms = 'Desconocido';
+        const dbmsMatch = output.match(/back-end DBMS:\s+([^\n]+)/i);
+        if (dbmsMatch) {
+            dbms = dbmsMatch[1].trim();
+        }
+        
+        let match;
+        while ((match = pocPattern.exec(output)) !== null) {
+            pocs.push({
+                parameter: match[1].trim(),
+                type: match[2].trim(),
+                title: match[3].trim(),
+                payload: match[4].trim(),
+                dbms: dbms
+            });
+        }
+        
+        return pocs;
+    }
+
+    async _parseResultsCSV(csvPath, onVulnerabilityFound, pocData = null) {
         try {
             const content = fs.readFileSync(csvPath, 'utf-8');
             const lines = content.split('\n').map(l => l.trim()).filter(l => l);
             
             if (lines.length < 2) {
-                this.logger.addLog('CSV de resultados vacío o sin datos', 'debug');
+                console.log('CSV de resultados vacío o sin datos', 'debug');
                 return;
             }
 
@@ -743,16 +777,37 @@ class SqlmapExecutor {
                     
                     // Verificar si ya fue reportada
                     if (this.reportedVulnerabilities.has(vulnId)) {
-                        this.logger.addLog(`Vulnerabilidad duplicada omitida: ${targetUrl} - ${parameter}`, 'debug');
+                        console.log(`Vulnerabilidad duplicada omitida: ${targetUrl} - ${parameter}`);
                         continue;
                     }
                     
                     // Marcar como reportada
                     this.reportedVulnerabilities.add(vulnId);
                     
-                    // Traducir técnicas de letras a nombres completos
+                    // Traducir técnicas de letras a nombres completos en español
                     const translatedTechniques = this._translateTechniques(techniques);
                     const severity = this._determineSeverityFromTechnique(techniques);
+                    
+                    // Buscar POC correspondiente a este parámetro
+                    let pocInfo = '';
+                    let dbmsInfo = 'Desconocido';
+                    
+                    if (pocData && pocData.length > 0) {
+                        const matchingPoc = pocData.find(poc => 
+                            poc.parameter.toLowerCase().includes(parameter.toLowerCase())
+                        );
+                        
+                        if (matchingPoc) {
+                            dbmsInfo = matchingPoc.dbms || 'Desconocido';
+                            pocInfo = `\n\nPrueba de concepto (PoC):\n\n${matchingPoc.payload}`;
+                        }
+                    }
+                    
+                    // Determinar método HTTP (GET/POST)
+                    const httpMethod = place === 'POST' || place.includes('POST') ? 'POST' : 'GET';
+                    
+                    // Construir descripción detallada
+                    const description = `El parámetro ${parameter} ${httpMethod} del endpoint ${targetUrl} presenta una vulnerabilidad de SQL Injection debido a una sanitización insuficiente de los datos de entrada. La aplicación concatena directamente los valores proporcionados por el usuario dentro de la sentencia SQL, lo que permite a un atacante alterar la lógica de la consulta.\n\nLa causa raíz del problema es la ausencia de consultas parametrizadas y de validación robusta de entradas. Aprovechando esta vulnerabilidad, fue posible identificar el gestor de base de datos utilizado (${dbmsInfo}) y confirmar el punto de inyección mediante la siguiente prueba de concepto:${pocInfo}`;
                     
                     this.logger.addLog(`✓ Vulnerabilidad SQLi encontrada: ${targetUrl} - ${parameter} (${translatedTechniques})`, 'success');
 
@@ -762,13 +817,14 @@ class SqlmapExecutor {
                             severity: severity,
                             endpoint: targetUrl,
                             parameter: parameter || 'unknown',
-                            description: `SQL Injection detectada - Place: ${place}, Technique: ${translatedTechniques}${notes ? `, Notes: ${notes}` : ''}`
+                            description: description,
+                            techniqueType: translatedTechniques // Pasar el tipo de técnica
                         });
                     }
                 }
             }
         } catch (error) {
-            this.logger.addLog(`Error parseando CSV: ${error.message}`, 'error');
+            console.log(`Error parseando CSV: ${error.message}`);
             throw error;
         }
     }
@@ -801,12 +857,12 @@ class SqlmapExecutor {
         if (!techniques) return techniques;
         
         const techMap = {
-            'B': 'Boolean-based blind',
-            'E': 'Error-based',
-            'U': 'Union query-based',
-            'S': 'Stacked queries',
-            'T': 'Time-based blind',
-            'Q': 'Inline queries'
+            'B': 'Inyección ciega basada en booleanos (Boolean-based blind)',
+            'E': 'Basada en errores (Error-based)',
+            'U': 'Basada en consultas UNION (Union query-based)',
+            'S': 'Consultas apiladas (Stacked queries)',
+            'T': 'Inyección ciega basada en tiempo (Time-based blind)',
+            'Q': 'Consultas en línea (Inline queries)'
         };
         
         // Separar por comas y traducir cada técnica
@@ -886,7 +942,7 @@ class SqlmapExecutor {
         const useShellFallback = opts.useShellFallback !== false;
     
         const { executable, args: finalArgs, spawnOpts } = this.getSpawnCommandForTool(this.toolConfig.path, Array.isArray(args) ? args.slice() : []);
-        this.logger.addLog(`Ejecutando comando: ${executable} ${finalArgs.join(' ')}`, 'debug', null, true);
+        console.log(`Ejecutando comando: ${executable} ${finalArgs.join(' ')}`, 'debug', null, true);
     
         try {
             return await this._executeProcess(executable, finalArgs, spawnOpts, timeout, autoRespond, autoRespondRegex);
