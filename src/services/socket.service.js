@@ -48,7 +48,7 @@ class SocketService {
                 const { scanId } = data;
                 
                 try {
-                    const scan = await Scan.findById(scanId);
+                    const scan = await Scan.Model.findById(scanId);
                     if (!scan) {
                         return socket.emit('error', { message: 'Scan not found' });
                     }
@@ -72,7 +72,7 @@ class SocketService {
                 const { scanId, config: scanConfig } = data;
 
                 try {
-                    const scan = await Scan.findById(scanId);
+                    const scan = await Scan.Model.findById(scanId);
                     if (!scan || scan.usuario_id.toString() !== socket.userId) {
                         return socket.emit('error', { message: 'Unauthorized or scan not found' });
                     }
@@ -81,7 +81,20 @@ class SocketService {
                         return socket.emit('error', { message: 'Scan already running' });
                     }
 
-                    const orchestrator = new ScanOrchestrator(scanId, scanConfig);
+                    // Load previous state if resuming
+                    const previousState = scan.estado === 'en_progreso' && scan.current_phase ? {
+                        current_phase: scan.current_phase,
+                        current_subphase: scan.current_subphase || null,
+                        completed_phases: scan.completed_phases || [],
+                        completed_subphases: scan.completed_subphases || [],
+                        discovered_endpoints: scan.discovered_endpoints || [],
+                        discovered_parameters: scan.discovered_parameters || [],
+                        tested_endpoints_sqli: scan.tested_endpoints_sqli || [],
+                        tested_endpoints_xss: scan.tested_endpoints_xss || [],
+                        asked_phases: scan.asked_phases || []
+                    } : null;
+
+                    const orchestrator = new ScanOrchestrator(scanId, scanConfig, previousState);
                     this.activeScans.set(scanId, orchestrator);
 
                     this.setupOrchestratorListeners(orchestrator, scanId);
@@ -89,7 +102,9 @@ class SocketService {
                     this.io.to(`scan:${scanId}`).emit('scan:status', orchestrator.getStatus());
 
                     scan.estado = 'en_progreso';
-                    scan.fecha_inicio = new Date();
+                    if (!previousState) {
+                        scan.fecha_inicio = new Date();
+                    }
                     await scan.save();
 
                     orchestrator.start().catch(error => {
@@ -98,7 +113,7 @@ class SocketService {
                         });
                     });
 
-                    socket.emit('scan:started', { scanId });
+                    socket.emit('scan:started', { scanId, isResuming: !!previousState });
                 } catch (error) {
                     socket.emit('error', { message: 'Error starting scan' });
                 }
@@ -122,7 +137,7 @@ class SocketService {
                 }
 
                 try {
-                    const scan = await Scan.findById(scanId);
+                    const scan = await Scan.Model.findById(scanId);
                     if (!scan || scan.usuario_id.toString() !== socket.userId) {
                         return socket.emit('error', { message: 'Unauthorized' });
                     }
@@ -143,7 +158,7 @@ class SocketService {
                 }
 
                 try {
-                    const scan = await Scan.findById(scanId);
+                    const scan = await Scan.Model.findById(scanId);
                     if (!scan || scan.usuario_id.toString() !== socket.userId) {
                         return socket.emit('error', { message: 'Unauthorized' });
                     }
@@ -164,7 +179,7 @@ class SocketService {
                 }
 
                 try {
-                    const scan = await Scan.findById(scanId);
+                    const scan = await Scan.Model.findById(scanId);
                     if (!scan || scan.usuario_id.toString() !== socket.userId) {
                         return socket.emit('error', { message: 'Unauthorized' });
                     }
@@ -248,25 +263,40 @@ class SocketService {
 
         orchestrator.on('scan:completed', async (data) => {
             try {
-                const scan = await Scan.findById(scanId);
+                const scan = await Scan.Model.findById(scanId)
+                    .populate('respuestas_usuario.pregunta_id')
+                    .populate('respuestas_usuario.respuestas_seleccionadas');
                 if (!scan) {
                     return;
                 }
 
-                const savedVulnerabilityIds = await this.saveVulnerabilities(scanId, data.vulnerabilities || []);
+                // Vulnerabilities are already saved individually during scan by saveVulnerabilityToDb
+                // Just get the IDs that are already in the scan document
+                const savedVulnerabilityIds = scan.vulnerabilidades || [];
                 
-                const savedAnswers = await this.saveQuestionAnswers(scanId, data.questionResults || []);
+                // All answers are already saved individually during scan by saveAttemptToDb
+                // No need to call saveQuestionAnswers - just use what's in the database
+                const allAnswers = scan.respuestas_usuario;
+                
+                // Helper function to check if question was answered correctly
+                const isAnsweredCorrectly = (respuestas_seleccionadas) => {
+                    if (!respuestas_seleccionadas || respuestas_seleccionadas.length === 0) return false;
+                    const lastAnswer = respuestas_seleccionadas[respuestas_seleccionadas.length - 1];
+                    return lastAnswer.es_correcta === true;
+                };
                 
                 // Calcular estadísticas de intentos
-                const totalIntentos = savedAnswers.length;
-                const intentosCorrectos = savedAnswers.filter(ans => ans.es_correcta).length;
+                const totalIntentos = allAnswers.reduce((sum, ans) => sum + ans.respuestas_seleccionadas.length, 0);
+                const intentosCorrectos = allAnswers.reduce((sum, ans) => {
+                    return sum + ans.respuestas_seleccionadas.filter(r => r.es_correcta).length;
+                }, 0);
                 const intentosIncorrectos = totalIntentos - intentosCorrectos;
                 
                 // Calcular preguntas únicas
                 const uniqueQuestionIds = new Set();
                 let totalQuizPoints = 0;
                 
-                for (const ans of savedAnswers) {
+                for (const ans of allAnswers) {
                     const questionIdStr = ans.pregunta_id.toString();
                     if (!uniqueQuestionIds.has(questionIdStr)) {
                         uniqueQuestionIds.add(questionIdStr);
@@ -281,20 +311,17 @@ class SocketService {
                 }
                 
                 const totalPreguntas = uniqueQuestionIds.size;
-                const preguntasCorrectas = new Set(
-                    savedAnswers.filter(ans => ans.es_correcta).map(ans => ans.pregunta_id.toString())
-                ).size;
+                const preguntasCorrectas = allAnswers.filter(ans => 
+                    isAnsweredCorrectly(ans.respuestas_seleccionadas)
+                ).length;
                 const preguntasIncorrectas = totalPreguntas - preguntasCorrectas;
                 
-                // Calcular puntos obtenidos (solo de los intentos correctos)
-                const quizPoints = savedAnswers
-                    .filter(ans => ans.es_correcta)
-                    .reduce((sum, ans) => sum + (ans.puntos_obtenidos || 0), 0);
+                // Calcular puntos obtenidos
+                const quizPoints = allAnswers.reduce((sum, ans) => sum + (ans.puntos_obtenidos || 0), 0);
                 
                 scan.estado = 'finalizado';
                 scan.fecha_fin = new Date();
-                scan.vulnerabilidades = savedVulnerabilityIds;
-                scan.respuestas_usuario = savedAnswers;
+                // vulnerabilidades ya están guardadas en scan.vulnerabilidades por saveVulnerabilityToDb
                 scan.puntuacion = {
                     puntos_cuestionario: quizPoints,
                     total_puntos_cuestionario: totalQuizPoints || 100,
@@ -307,7 +334,39 @@ class SocketService {
                     preguntas_incorrectas: preguntasIncorrectas
                 };
                 
-                scan.calculateScore();
+                // Calcular puntuación final (60/40 formula)
+                let quizScore = 0;
+                if (totalQuizPoints > 0) {
+                    const porcentajeCuestionario = quizPoints / totalQuizPoints;
+                    quizScore = porcentajeCuestionario * 60;
+                }
+                
+                const penalizacionVulnerabilidades = savedVulnerabilityIds.length * 5;
+                let vulnerabilityScore = 40;
+                let penalizacionExcedente = 0;
+                
+                if (penalizacionVulnerabilidades > 40) {
+                    vulnerabilityScore = 0;
+                    penalizacionExcedente = penalizacionVulnerabilidades - 40;
+                } else {
+                    vulnerabilityScore = 40 - penalizacionVulnerabilidades;
+                }
+                
+                const puntuacionFinal = Math.max(0, Math.round(quizScore - penalizacionExcedente + vulnerabilityScore));
+                
+                let calificacion = 'Crítico';
+                if (puntuacionFinal >= 90) {
+                    calificacion = 'Excelente';
+                } else if (puntuacionFinal >= 75) {
+                    calificacion = 'Bueno';
+                } else if (puntuacionFinal >= 60) {
+                    calificacion = 'Regular';
+                } else if (puntuacionFinal >= 40) {
+                    calificacion = 'Deficiente';
+                }
+                
+                scan.puntuacion.puntuacion_final = puntuacionFinal;
+                scan.puntuacion.calificacion = calificacion;
                 
                 await scan.save();
 
@@ -349,7 +408,7 @@ class SocketService {
 
         orchestrator.on('scan:error', async (data) => {
             try {
-                const scan = await Scan.findById(scanId);
+                const scan = await Scan.Model.findById(scanId);
                 if (scan) {
                     scan.estado = 'error';
                     await scan.save();
@@ -369,172 +428,6 @@ class SocketService {
 
     isScanning(scanId) {
         return this.activeScans.has(scanId);
-    }
-
-    async saveVulnerabilities(scanId, vulnerabilities) {
-        const savedIds = [];
-
-        for (const vuln of vulnerabilities) {
-            try {
-                let typeName = vuln.type;
-                if (typeName === 'SQLi') typeName = 'SQLi';
-                else if (typeName === 'XSS') typeName = 'XSS';
-                
-                let vulnerabilityType = await VulnerabilityType.findOne({ nombre: typeName });
-                if (!vulnerabilityType) {
-                    vulnerabilityType = new VulnerabilityType({
-                        nombre: typeName,
-                        descripcion: `Vulnerabilidad de tipo ${typeName}`
-                    });
-                    await vulnerabilityType.save();
-                }
-                const severityMap = {
-                    'critical': 'Crítica',
-                    'high': 'Alta',
-                    'medium': 'Media',
-                    'low': 'Baja',
-                    'critica': 'Crítica',
-                    'alta': 'Alta',
-                    'media': 'Media',
-                    'baja': 'Baja'
-                };
-                
-                const severityName = severityMap[vuln.severity?.toLowerCase()] || 'Media';
-                let severityLevel = await SeverityLevel.findOne({ nombre: severityName });
-                if (!severityLevel) {
-                    severityLevel = new SeverityLevel({
-                        nombre: severityName,
-                        descripcion: `Nivel de severidad ${severityName}`
-                    });
-                    await severityLevel.save();
-                }
-
-                const vulnerability = new Vulnerability({
-                    escaneo_id: scanId,
-                    tipo_id: vulnerabilityType._id,
-                    nivel_severidad_id: severityLevel._id,
-                    parametro_afectado: vuln.parameter || null,
-                    url_afectada: vuln.endpoint || null,
-                    descripcion: vuln.description || `Vulnerabilidad ${typeName} detectada`,
-                    sugerencia: this._getVulnerabilitySuggestion(typeName),
-                    referencia: this._getVulnerabilityReferences(typeName)
-                });
-
-                await vulnerability.save();
-                savedIds.push(vulnerability._id);
-            } catch (error) {
-            }
-        }
-
-        return savedIds;
-    }
-
-    async saveQuestionAnswers(scanId, questionResults) {
-        const savedAnswers = [];
-
-        // Guardar TODOS los intentos (correctos e incorrectos)
-        for (const result of questionResults) {
-            try {
-                let question;
-                let savedAnswerIds = [];
-                
-                if (result.questionId) {
-                    question = await Question.findById(result.questionId);
-                    if (!question) {
-                        continue;
-                    }
-                    
-                    if (result.answerIds && result.answerIds.length > 0) {
-                        savedAnswerIds = result.answerIds;
-                    } else {
-                        const answerOptions = result.options || [];
-                        for (const optionText of answerOptions) {
-                            const answer = await Answer.findOne({ 
-                                pregunta_id: question._id,
-                                texto_respuesta: optionText
-                            });
-                            if (answer) {
-                                savedAnswerIds.push(answer._id);
-                            }
-                        }
-                    }
-                } else {
-                    question = await Question.findOne({ texto_pregunta: result.question });
-                    if (!question) {
-                        let dificultad = 'facil';
-                        if (result.points > 15) dificultad = 'dificil';
-                        else if (result.points > 10) dificultad = 'media';
-
-                        question = new Question({
-                            texto_pregunta: result.question,
-                            dificultad: dificultad,
-                            puntos: result.points || 10,
-                            fase: result.phase || 'init'
-                        });
-                        await question.save();
-                    }
-
-                    const answerOptions = result.options || [];
-                    
-                    for (let i = 0; i < answerOptions.length; i++) {
-                        let answer = await Answer.findOne({ 
-                            pregunta_id: question._id,
-                            texto_respuesta: answerOptions[i]
-                        });
-                        
-                        if (!answer) {
-                            answer = new Answer({
-                                pregunta_id: question._id,
-                                texto_respuesta: answerOptions[i],
-                                es_correcta: i === result.correctAnswer
-                            });
-                            await answer.save();
-                        }
-                        
-                        savedAnswerIds.push(answer._id);
-                    }
-                }
-
-                const selectedAnswerIndex = result.userAnswer !== undefined ? result.userAnswer : -1;
-                const respuesta_seleccionada_id = savedAnswerIds[selectedAnswerIndex] || savedAnswerIds[0];
-
-                // Sistema de puntos por intentos: 1er intento=100%, 2do=80%, 3ro+=20% del valor de la pregunta
-                const puntos = result.pointsEarned || 0;
-                const intentos = result.attempts || 1;
-                
-                const userAnswer = {
-                    pregunta_id: question._id,
-                    respuesta_seleccionada_id: respuesta_seleccionada_id,
-                    es_correcta: result.correct || false,
-                    puntos_obtenidos: puntos,
-                    numero_intentos: intentos
-                };
-
-                savedAnswers.push(userAnswer);
-            } catch (error) {
-            }
-        }
-
-        return savedAnswers;
-    }
-
-    _getVulnerabilitySuggestion(type) {
-        const suggestions = {
-            'SQLi': '- Usa consultas parametrizadas o prepared statements. Este enfoque garantiza que la entrada del usuario siempre sea tratada como datos, no como comandos SQL ejecutables.\n- Aplica reglas estrictas de listas blancas (whitelists) basadas en los requisitos específicos de cada campo. Por ejemplo, para un nombre de usuario, esto implicaría restringir la entrada a un conjunto definido de caracteres y una longitud permitida (por ejemplo, 3–20 caracteres alfanuméricos).\n- La cuenta de la base de datos utilizada por la aplicación debe operar con los mínimos privilegios necesarios, típicamente limitada a operaciones SELECT e INSERT sobre tablas específicas. Esta estrategia de contención limita el daño potencial si ocurriera un ataque exitoso de inyección.',
-            'XSS': 'Implemente validación de entrada y escapado de salida. Use Content Security Policy (CSP) y considere sanitizar el contenido HTML antes de mostrarlo.',
-            'CSRF': 'Implemente tokens CSRF (tokens sincronizadores) y verifique el origen de las peticiones.',
-            'XXE': 'Deshabilite el procesamiento de entidades externas XML. Use procesadores XML seguros que no procesen DTDs externos.',
-            'SSTI': 'Evite usar motores de plantillas que evalúen código arbitrario. Use motores de plantillas seguros o sanitice las plantillas.'
-        };
-        return suggestions[type] || 'Revise y corrija la vulnerabilidad siguiendo las mejores prácticas de seguridad.';
-    }
-
-    _getVulnerabilityReferences(type) {
-        const references = {
-            'SQLi': 'OWASP - SQL Injection\nhttps://owasp.org/www-community/attacks/SQL_Injection\n\nOWASP - Query Parametrization Cheat Sheet\nhttps://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html\n\nOWASP - Input Validation Cheat Sheet\nhttps://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html',
-            'XSS': 'OWASP - Cross Site Scripting (XSS)\nhttps://owasp.org/www-community/attacks/xss/\n\nOWASP - XSS Prevention Cheat Sheet\nhttps://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html'
-        };
-        return references[type] || null;
     }
 }
 

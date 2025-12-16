@@ -84,11 +84,11 @@ describe('PRUEBAS CRÍTICAS DE INTEGRACIÓN', () => {
                 url: 'http://testphp.vulnweb.com',
                 flags: { xss: true, sqli: true },
                 respuestas_usuario: [
-                    { pregunta_id: questions[0]._id, respuesta_seleccionada_id: questions[0]._id, es_correcta: true, intentos: 1, puntos_obtenidos: 10 },
-                    { pregunta_id: questions[1]._id, respuesta_seleccionada_id: questions[1]._id, es_correcta: true, intentos: 2, puntos_obtenidos: 8 },
-                    { pregunta_id: questions[2]._id, respuesta_seleccionada_id: questions[2]._id, es_correcta: true, intentos: 1, puntos_obtenidos: 10 },
-                    { pregunta_id: questions[3]._id, respuesta_seleccionada_id: questions[3]._id, es_correcta: true, intentos: 3, puntos_obtenidos: 2 },
-                    { pregunta_id: questions[4]._id, respuesta_seleccionada_id: questions[4]._id, es_correcta: true, intentos: 1, puntos_obtenidos: 10 }
+                    { pregunta_id: questions[0]._id, respuestas_seleccionadas: [answers[0]._id], puntos_obtenidos: 10 },
+                    { pregunta_id: questions[1]._id, respuestas_seleccionadas: [answers[1]._id, answers[2]._id], puntos_obtenidos: 8 },
+                    { pregunta_id: questions[2]._id, respuestas_seleccionadas: [answers[3]._id], puntos_obtenidos: 10 },
+                    { pregunta_id: questions[3]._id, respuestas_seleccionadas: [answers[4]._id, answers[5]._id, answers[6]._id], puntos_obtenidos: 2 },
+                    { pregunta_id: questions[4]._id, respuestas_seleccionadas: [answers[7]._id], puntos_obtenidos: 10 }
                 ],
                 puntuacion: {
                     puntos_cuestionario: 40,

@@ -96,7 +96,7 @@ class DiscoveryPhase {
                 this.addParameter(param);
             }
             
-            this.logger.addLog(`✓ Procesados ${result.endpoints.length} endpoint(s) y ${result.parameters.length} parámetro(s) del CSV`, 'success');
+            console.log(`✓ Procesados ${result.endpoints.length} endpoint(s) y ${result.parameters.length} parámetro(s) del CSV`, 'success');
             
             if (targetsResult) {
                 console.log(`✓ Archivos targets.txt generados: ${targetsResult.getCount} GET, ${targetsResult.postCount} POST`, 'debug');

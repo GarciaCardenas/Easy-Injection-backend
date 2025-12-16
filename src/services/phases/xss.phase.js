@@ -11,9 +11,19 @@ class XSSPhase {
     }
 
     async run() {
-        await this.runSubphase('context');
-        await this.runSubphase('payload');
-        await this.runSubphase('fuzzing');
+        const subphases = ['context', 'payload', 'fuzzing'];
+        
+        for (const subphaseId of subphases) {
+            const subphaseFullId = `xss-${subphaseId}`;
+            
+            // Skip if subphase already completed
+            if (this.emitter.completedSubphases && this.emitter.completedSubphases.includes(subphaseFullId)) {
+                this.logger.addLog(`Subfase ${subphaseFullId} ya completada, omitiendo...`, 'info');
+                continue;
+            }
+            
+            await this.runSubphase(subphaseId);
+        }
     }
 
     async runSubphase(subphaseId) {
@@ -27,6 +37,12 @@ class XSSPhase {
         if (!subphase) return;
 
         const subphaseFullId = `xss-${subphaseId}`;
+        
+        // Update current subphase in orchestrator
+        if (this.emitter.setCurrentSubphase) {
+            this.emitter.setCurrentSubphase(subphaseFullId);
+        }
+        
         this.logger.setCurrentPhase(subphaseFullId);
         this.logger.addLog(`XSS - ${subphase.name}`, 'info', subphaseFullId);
         this.emitter.emit('subphase:started', { 
@@ -42,6 +58,11 @@ class XSSPhase {
             subphase: subphaseId, 
             name: subphase.name 
         });
+        
+        // Clear current subphase after completion
+        if (this.emitter.setCurrentSubphase) {
+            this.emitter.setCurrentSubphase(null);
+        }
         
         this.logger.setCurrentPhase('xss');
     }
@@ -86,35 +107,35 @@ class XSSPhase {
             if (!testedUrls.has(param.endpoint)) {
                 testedUrls.add(param.endpoint);
                 
+                // Check if this endpoint was already tested
+                const endpointObj = { method: 'GET', url: param.endpoint };
+                if (this.emitter.isEndpointTestedForXss && this.emitter.isEndpointTestedForXss(endpointObj)) {
+                    this.logger.addLog(`Omitiendo ${param.endpoint} - ya fue testeado para XSS`, 'info');
+                    continue;
+                }
+                
                 this.logger.addLog(`Fuzzing XSS en ${param.endpoint}`, 'info');
                 
                 try {
                     await this.dalfoxExecutor.scanUrl(param.endpoint, (vuln) => {
-                        this.logger.addLog(`[XSS] Vulnerabilidad detectada:`, 'info');
-                        this.logger.addLog(`  - Endpoint: ${vuln.endpoint}`, 'info');
-                        this.logger.addLog(`  - Parámetro: ${vuln.parameter}`, 'info');
-                        this.logger.addLog(`  - Severidad: ${vuln.severity}`, 'info');
-                        this.logger.addLog(`  - Descripción: ${vuln.description}`, 'info');
+                        console.log(`[XSS] Vulnerabilidad detectada:`, 'info');
+                        console.log(`  - Endpoint: ${vuln.endpoint}`, 'info');
+                        console.log(`  - Parámetro: ${vuln.parameter}`, 'info');
+                        console.log(`  - Severidad: ${vuln.severity}`, 'info');
+                        console.log(`  - Descripción: ${vuln.description}`, 'info');
                         
-                        this.addVulnerability(vuln);
+                        // Call orchestrator's addVulnerability directly
+                        this.emitter.addVulnerability(vuln);
                     });
+                    
+                    // Mark endpoint as tested
+                    if (this.emitter.markEndpointTestedForXss) {
+                        this.emitter.markEndpointTestedForXss(endpointObj);
+                    }
                 } catch (error) {
                     this.logger.addLog(`Error en fuzzing XSS: ${error.message}`, 'warning');
                 }
             }
-        }
-    }
-
-    addVulnerability(vuln) {
-        if (!this.vulnerabilities.some(v => 
-            v.endpoint === vuln.endpoint && 
-            v.parameter === vuln.parameter &&
-            v.type === 'XSS'
-        )) {
-            this.vulnerabilities.push(vuln);
-            this.stats.vulnerabilitiesFound++;
-            this.logger.addLog(`¡Vulnerabilidad XSS encontrada en ${vuln.parameter}!`, 'warning');
-            this.emitter.emit('vulnerability:found', vuln);
         }
     }
 }

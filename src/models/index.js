@@ -22,7 +22,6 @@ const { Question, validate: validateQuestion } = require('./quiz/question.model'
 const { Answer, validate: validateAnswer } = require('./quiz/answer.model');
 
 // Catalog Models
-const { AuthType, validate: validateAuthType } = require('./catalog/auth-type.model');
 const { GestorBD, validate: validateGestorBD } = require('./catalog/db-manager.model');
 const { VulnerabilityType, validate: validateVulnerabilityType } = require('./catalog/vulnerability-type.model');
 const { SeverityLevel, validate: validateSeverityLevel } = require('./catalog/severity-level.model');
@@ -64,8 +63,6 @@ module.exports = {
     validateAnswer,
 
     // Catalog Models
-    AuthType,
-    validateAuthType,
     GestorBD,
     validateGestorBD,
     DbManager: GestorBD, // Alias para compatibilidad

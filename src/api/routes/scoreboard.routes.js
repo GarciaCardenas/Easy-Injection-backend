@@ -26,12 +26,18 @@ router.get("/", auth, async (req, res) => {
       estado: "finalizado",
       ...dateFilter,
     })
+      .populate('respuestas_usuario.respuestas_seleccionadas')
       .sort({ "puntuacion.puntuacion_final": -1 })
       .limit(parseInt(limit))
       .select("alias url fecha_inicio fecha_fin puntuacion vulnerabilidades respuestas_usuario");
 
     const scoreboard = userScans.map((scan, index) => {
-      const correctAnswers = scan.respuestas_usuario?.filter(r => r.es_correcta).length || 0;
+      // Count correct answers by checking if last selected answer is correct
+      const correctAnswers = scan.respuestas_usuario?.filter(ru => {
+        if (!ru.respuestas_seleccionadas || ru.respuestas_seleccionadas.length === 0) return false;
+        const lastAnswer = ru.respuestas_seleccionadas[ru.respuestas_seleccionadas.length - 1];
+        return lastAnswer?.es_correcta === true;
+      }).length || 0;
       const totalQuestions = scan.respuestas_usuario?.length || 0;
       const vulnerabilitiesFound = scan.puntuacion?.vulnerabilidades_encontradas || 0;
 

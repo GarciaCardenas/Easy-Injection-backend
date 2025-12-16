@@ -1,13 +1,32 @@
 const { Question } = require('../../models/quiz/question.model');
 const { Answer } = require('../../models/quiz/answer.model');
+const crypto = require('crypto');
 
 class QuestionHandler {
-    constructor(emitter, logger) {
+    constructor(emitter, logger, askedPhases = []) {
         this.emitter = emitter;
         this.logger = logger;
         this.isPaused = false;
         this.pauseResolver = null;
         this.questionAttempts = new Map(); // Rastrear intentos por pregunta
+        this.askedPhases = new Set(askedPhases); // Rastrear fases cuyas preguntas ya se hicieron
+    }
+
+    // Función para obtener un índice aleatorio criptográficamente seguro
+    getSecureRandomIndex(max) {
+        const randomBytes = crypto.randomBytes(4);
+        const randomNumber = randomBytes.readUInt32BE(0);
+        return randomNumber % max;
+    }
+
+    // Función para mezclar un array de forma segura (Fisher-Yates shuffle)
+    secureShuffleArray(array) {
+        const shuffled = [...array];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = this.getSecureRandomIndex(i + 1);
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
     }
 
     async waitIfPaused() {
@@ -35,7 +54,7 @@ class QuestionHandler {
                 return null;
             }
             
-            const randomIndex = Math.floor(Math.random() * questions.length);
+            const randomIndex = this.getSecureRandomIndex(questions.length);
             const question = questions[randomIndex];
             
             const answers = await Answer.Model.find({ pregunta_id: question._id }).sort({ es_correcta: -1 });
@@ -47,7 +66,7 @@ class QuestionHandler {
             
             const correctAnswerIndex = answers.findIndex(a => a.es_correcta === true);
             
-            const shuffledAnswers = [...answers].sort(() => Math.random() - 0.5);
+            const shuffledAnswers = this.secureShuffleArray(answers);
             const shuffledCorrectIndex = shuffledAnswers.findIndex(a => a.es_correcta === true);
             
             return {
@@ -66,6 +85,12 @@ class QuestionHandler {
     }
 
     async askQuestion(questionData = null, phase = null) {
+        // Check if question from this phase was already asked
+        if (phase && this.askedPhases.has(phase)) {
+            this.logger.addLog(`Pregunta de la fase '${phase}' ya fue contestada previamente, omitiendo...`, 'info');
+            return;
+        }
+        
         this.isPaused = true;
         this.logger.addLog('⏸ Escaneo pausado - Pregunta teórica', 'info');
         
@@ -123,7 +148,16 @@ class QuestionHandler {
                     attempts: currentAttempts
                 });
                 
+                // Save ALL attempts to DB immediately (whether correct or incorrect)
+                this.saveAttemptToDb(questionToAsk, answer.selectedAnswer, isCorrect, currentAttempts, pointsEarned).catch(err => {
+                    this.logger.addLog(`Error guardando intento: ${err.message}`, 'warning');
+                });
+                
                 if (isCorrect) {
+                    // Mark phase as asked when question is answered correctly
+                    if (phase) {
+                        this.askedPhases.add(phase);
+                    }
                     this.logger.addLog(`✓ Respuesta correcta en el intento ${currentAttempts}! Puntos obtenidos: ${pointsEarned}. Continuando escaneo...`, 'success');
                     this.isPaused = false;
                     
@@ -150,6 +184,52 @@ class QuestionHandler {
 
     isCurrentlyPaused() {
         return this.isPaused;
+    }
+
+    async saveAttemptToDb(questionData, userAnswerIndex, isCorrect, currentAttempts, pointsEarned) {
+        try {
+            const Scan = require('../../models/scan/scan.model').Scan;
+            const answerId = questionData.answerIds[userAnswerIndex];
+            const questionId = questionData.questionId;
+            
+            // Try to add answer to existing question atomically
+            const updateResult = await Scan.Model.updateOne(
+                { 
+                    _id: this.emitter.scanId,
+                    'respuestas_usuario.pregunta_id': questionId
+                },
+                { 
+                    $push: { 
+                        'respuestas_usuario.$.respuestas_seleccionadas': answerId 
+                    },
+                    ...(isCorrect && { 
+                        $set: { 
+                            'respuestas_usuario.$.puntos_obtenidos': pointsEarned 
+                        } 
+                    })
+                }
+            );
+            
+            // If no existing entry was found, create new one
+            if (updateResult.matchedCount === 0) {
+                await Scan.Model.updateOne(
+                    { _id: this.emitter.scanId },
+                    { 
+                        $push: { 
+                            respuestas_usuario: {
+                                pregunta_id: questionId,
+                                respuestas_seleccionadas: [answerId],
+                                puntos_obtenidos: isCorrect ? pointsEarned : 0
+                            }
+                        }
+                    }
+                );
+            }
+            
+            console.log(`Intento ${currentAttempts} guardado en BD`, 'info');
+        } catch (error) {
+            this.logger.addLog(`Error en saveAttemptToDb: ${error.message}`, 'warning');
+        }
     }
 }
 

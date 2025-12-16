@@ -58,7 +58,7 @@ const questions = [
     texto_pregunta: '¿Cuál es una razón común por la que los parámetros GET se consideran vectores de ataque?',
     dificultad: 'media',
     puntos: 15,
-    fase: 'parameters',
+    fase: 'discovery',
     respuestas: [
       { texto: 'Son los más fáciles de ordenar alfabéticamente', es_correcta: false },
       { texto: 'No requieren que el servidor almacene sesiones', es_correcta: false },

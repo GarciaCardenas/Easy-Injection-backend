@@ -708,8 +708,15 @@ class SqlmapExecutor {
         // Log informativo relevante (los resultados reales vienen del CSV)
         if (line.match(/Parameter:.*vulnerable/i)) {
             this.logger.addLog(`✓ ${line.trim()}`, 'success');
-        } else if (line.match(/back-end DBMS/i)) {
-            this.logger.addLog(`DBMS identificado: ${line.trim()}`, 'success');
+        } else if (phase === 'fingerprint' && line.match(/back-end DBMS/i)) {
+            // Solo mostrar DBMS en fase de fingerprinting - solo el más importante
+            if (!line.includes('WARNING') && 
+                !line.includes('zero knowledge') && 
+                !line.includes('resuming back-end') &&
+                !line.includes('[INFO] the back-end DBMS is') &&
+                line.includes('active fingerprint')) {
+                this.logger.addLog(`DBMS identificado: ${line.trim()}`, 'success');
+            }
         } else if (line.match(/injection type:/i)) {
             this.logger.addLog(`Tipo de inyección: ${line.trim()}`, 'info');
         }
@@ -753,7 +760,7 @@ class SqlmapExecutor {
 
             // Primera línea es el header: Target URL, Place, Parameter, Technique(s), Note(s)
             const header = lines[0];
-            this.logger.addLog(`CSV Header: ${header}`, 'debug');
+            console.log(`CSV Header: ${header}`, 'debug');
 
             // Procesar cada línea de resultados
             for (let i = 1; i < lines.length; i++) {

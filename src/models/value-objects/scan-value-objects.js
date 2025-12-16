@@ -23,32 +23,25 @@ class ScanFlags {
 
 class UserAnswer {
     #pregunta_id;
-    #respuesta_seleccionada_id;
-    #es_correcta;
+    #respuestas_seleccionadas;
     #puntos_obtenidos;
-    #numero_intentos;
 
     constructor(data = {}) {
         this.#pregunta_id = data.pregunta_id;
-        this.#respuesta_seleccionada_id = data.respuesta_seleccionada_id;
-        this.#es_correcta = Boolean(data.es_correcta);
+        this.#respuestas_seleccionadas = data.respuestas_seleccionadas || [];
         this.#puntos_obtenidos = data.puntos_obtenidos || 0;
-        this.#numero_intentos = data.numero_intentos || 1;
     }
 
     get pregunta_id() { return this.#pregunta_id; }
-    get respuesta_seleccionada_id() { return this.#respuesta_seleccionada_id; }
-    get es_correcta() { return this.#es_correcta; }
+    get respuestas_seleccionadas() { return this.#respuestas_seleccionadas; }
     get puntos_obtenidos() { return this.#puntos_obtenidos; }
-    get numero_intentos() { return this.#numero_intentos; }
+    get numero_intentos() { return this.#respuestas_seleccionadas.length; }
 
     toObject() {
         return {
             pregunta_id: this.#pregunta_id,
-            respuesta_seleccionada_id: this.#respuesta_seleccionada_id,
-            es_correcta: this.#es_correcta,
-            puntos_obtenidos: this.#puntos_obtenidos,
-            numero_intentos: this.#numero_intentos
+            respuestas_seleccionadas: this.#respuestas_seleccionadas,
+            puntos_obtenidos: this.#puntos_obtenidos
         };
     }
 }

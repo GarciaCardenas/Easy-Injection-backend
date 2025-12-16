@@ -11,10 +11,19 @@ class SQLiPhase {
     }
 
     async run() {
-        await this.runSubphase('detection');
-        await this.runSubphase('fingerprint');
-        await this.runSubphase('technique');
-        await this.runSubphase('exploit');
+        const subphases = ['detection', 'fingerprint', 'technique', 'exploit'];
+        
+        for (const subphaseId of subphases) {
+            const subphaseFullId = `sqli-${subphaseId}`;
+            
+            // Skip if subphase already completed
+            if (this.emitter.completedSubphases && this.emitter.completedSubphases.includes(subphaseFullId)) {
+                this.logger.addLog(`Subfase ${subphaseFullId} ya completada, omitiendo...`, 'info');
+                continue;
+            }
+            
+            await this.runSubphase(subphaseId);
+        }
     }
 
     async runSubphase(subphaseId) {
@@ -29,6 +38,12 @@ class SQLiPhase {
         if (!subphase) return;
 
         const subphaseFullId = `sqli-${subphaseId}`;
+        
+        // Update current subphase in orchestrator
+        if (this.emitter.setCurrentSubphase) {
+            this.emitter.setCurrentSubphase(subphaseFullId);
+        }
+        
         this.logger.setCurrentPhase(subphaseFullId);
         this.logger.addLog(`SQLi - ${subphase.name}`, 'info', subphaseFullId);
         this.emitter.emit('subphase:started', { 
@@ -44,6 +59,11 @@ class SQLiPhase {
             subphase: subphaseId, 
             name: subphase.name 
         });
+        
+        // Clear current subphase after completion
+        if (this.emitter.setCurrentSubphase) {
+            this.emitter.setCurrentSubphase(null);
+        }
         
         this.logger.setCurrentPhase('sqli');
     }
@@ -75,12 +95,25 @@ class SQLiPhase {
         for (const [endpoint, params] of paramsByEndpoint.entries()) {
             await this.questionHandler.waitIfPaused();
             
+            // Check if this endpoint was already tested
+            const endpointObj = { method: 'GET', url: endpoint }; // Assuming GET, adjust if needed
+            if (this.emitter.isEndpointTestedForSqli && this.emitter.isEndpointTestedForSqli(endpointObj)) {
+                this.logger.addLog(`Omitiendo ${endpoint} - ya fue testeado para SQLi`, 'info');
+                continue;
+            }
+            
             this.logger.addLog(`Testeando SQLi en ${endpoint} con parámetros: ${params.map(p => p.name).join(', ')}`, 'info');
             
             try {
                 await this.sqlmapExecutor.testEndpoint(endpoint, params, 'detection', (vuln) => {
-                    this.addVulnerability(vuln);
+                    // Call orchestrator's addVulnerability directly
+                    this.emitter.addVulnerability(vuln);
                 });
+                
+                // Mark endpoint as tested
+                if (this.emitter.markEndpointTestedForSqli) {
+                    this.emitter.markEndpointTestedForSqli(endpointObj);
+                }
             } catch (error) {
                 this.logger.addLog(`Error testeando endpoint ${endpoint}: ${error.message}`, 'warning');
             }
@@ -96,16 +129,25 @@ class SQLiPhase {
 
         this.logger.addLog('Ejecutando fingerprinting de la base de datos...', 'info');
         
-        const vulnerableParams = this.discoveredParameters.filter(p => 
-            this.vulnerabilities.some(v => v.parameter === p.name && v.type === 'SQLi')
-        );
+        // Buscar un parámetro vulnerable de SQLi
+        const sqlVuln = this.vulnerabilities.find(v => v.type === 'SQLi');
         
-        if (vulnerableParams.length === 0) {
-            this.logger.addLog('No hay parámetros vulnerables para fingerprinting', 'info');
+        if (!sqlVuln) {
+            this.logger.addLog('No hay vulnerabilidades SQLi detectadas para fingerprinting', 'info');
             return;
         }
         
-        const param = vulnerableParams[0];
+        // Buscar el parámetro correspondiente en discoveredParameters
+        const param = this.discoveredParameters.find(p => 
+            p.endpoint === sqlVuln.endpoint && p.name === sqlVuln.parameter
+        );
+        
+        if (!param) {
+            this.logger.addLog(`No se encontró información del parámetro vulnerable ${sqlVuln.parameter}`, 'warning');
+            return;
+        }
+        
+        this.logger.addLog(`Ejecutando fingerprinting en ${param.endpoint} (parámetro: ${param.name})`, 'info');
         
         try {
             await this.sqlmapExecutor.testParameter(param, 'fingerprint');
@@ -130,7 +172,7 @@ class SQLiPhase {
         const uniqueTechniques = [...new Set(techniques)];
         
         if (uniqueTechniques.length > 0) {
-            this.logger.addLog(`Técnicas disponibles: ${uniqueTechniques.join(', ')}`, 'info');
+            this.logger.addLog(`Técnicas disponibles: ${techniques.join(', ')}`, 'info');
             this.logger.addLog(`Técnica óptima: ${uniqueTechniques[0]}`, 'success');
         } else {
             this.logger.addLog('No se detectaron técnicas específicas', 'info');
@@ -152,16 +194,25 @@ class SQLiPhase {
 
         this.logger.addLog('Generando POC (Proof of Concept) - Solo lectura', 'info');
         
-        const vulnerableParams = this.discoveredParameters.filter(p => 
-            this.vulnerabilities.some(v => v.parameter === p.name && v.type === 'SQLi')
-        );
+        // Buscar un parámetro vulnerable de SQLi
+        const sqlVuln = this.vulnerabilities.find(v => v.type === 'SQLi');
         
-        if (vulnerableParams.length === 0) {
-            this.logger.addLog('No hay parámetros vulnerables para explotar', 'info');
+        if (!sqlVuln) {
+            this.logger.addLog('No hay vulnerabilidades SQLi detectadas para explotar', 'info');
             return;
         }
         
-        const param = vulnerableParams[0];
+        // Buscar el parámetro correspondiente en discoveredParameters
+        const param = this.discoveredParameters.find(p => 
+            p.endpoint === sqlVuln.endpoint && p.name === sqlVuln.parameter
+        );
+        
+        if (!param) {
+            this.logger.addLog(`No se encontró información del parámetro vulnerable ${sqlVuln.parameter}`, 'warning');
+            return;
+        }
+        
+        this.logger.addLog(`Generando POC en ${param.endpoint} (parámetro: ${param.name})`, 'info');
         
         try {
             await this.sqlmapExecutor.testParameter(param, 'exploit');
@@ -169,13 +220,6 @@ class SQLiPhase {
         } catch (error) {
             this.logger.addLog(`Error en explotación: ${error.message}`, 'warning');
         }
-    }
-
-    addVulnerability(vuln) {
-        this.vulnerabilities.push(vuln);
-        this.stats.vulnerabilitiesFound++;
-        this.logger.addLog(`¡Vulnerabilidad SQLi encontrada en ${vuln.parameter}!`, 'warning');
-        this.emitter.emit('vulnerability:found', vuln);
     }
 }
 

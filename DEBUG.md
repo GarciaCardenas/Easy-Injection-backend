@@ -28,9 +28,6 @@ $env:DEBUG = "easyinjection:models:scan,easyinjection:models:user"
 - `easyinjection:models:vulntype` - `src/models/catalog/vulnerability-type.model.js`
   - Logs de VulnerabilityType (creación, conversión, operaciones CRUD)
   
-- `easyinjection:models:authtype` - `src/models/catalog/auth-type.model.js`
-  - Logs de AuthType (creación, conversión, tipos de autenticación)
-  
 - `easyinjection:models:gestordb` - `src/models/catalog/db-manager.model.js`
   - Logs de DBManager (gestores de base de datos, conexiones)
 

@@ -189,6 +189,21 @@ class DalfoxExecutor {
         return match;
     }
 
+    _cleanEndpointUrl(url) {
+        try {
+            // Eliminar parámetros de query string
+            const urlObj = new URL(url);
+            return `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+        } catch (e) {
+            // Si no es una URL válida, intentar remover todo después de '?'
+            const questionMarkIndex = url.indexOf('?');
+            if (questionMarkIndex !== -1) {
+                return url.substring(0, questionMarkIndex);
+            }
+            return url;
+        }
+    }
+
     _parseOutput(result, onVulnerabilityFound) {
         const vulnType = result.type;
 
@@ -217,38 +232,40 @@ class DalfoxExecutor {
                 }
             }
             
+            // Limpiar endpoint para mostrar solo la URL base sin parámetros
+            const cleanEndpoint = this._cleanEndpointUrl(endpoint);
+            
             const param = result.param || result.data?.param || 'unknown';
-            
             const payload = result.payload || result.data?.payload || 'detected';
-            
             const injectType = result.inject_type || result.data?.inject_type || '';
             const method = result.method || result.data?.method || 'GET';
             
-            let description = `XSS ${vulnType === 'V' ? 'vulnerability' : vulnType.toLowerCase()} encontrado`;
-            if (method !== 'GET') {
-                description += ` (${method})`;
-            }
-            if (param !== 'unknown') {
-                description += ` en parámetro '${param}'`;
-            }
-            if (injectType) {
-                description += ` [${injectType}]`;
-            }
-            if (payload && payload !== 'detected') {
-                description += ` - Payload: ${payload}`;
-            }
+            // Traducir el tipo de XSS
+            const xssTypeInfo = this._translateXSSType(injectType);
+            const xssTypeSpanish = xssTypeInfo.context || 'Cross-Site Scripting';
+            const paramMethod = xssTypeInfo.method || (method === 'POST' ? 'POST' : 'GET');
+            
+            // Construir descripción según el nuevo formato usando el endpoint limpio
+            let description = `El endpoint ${cleanEndpoint} presenta una vulnerabilidad Cross-Site Scripting (XSS) de tipo ${xssTypeSpanish}, debido a una sanitización insuficiente de los datos proporcionados por el usuario. Durante el análisis se comprobó que el parámetro ${param} de tipo ${paramMethod} acepta contenido malicioso que posteriormente es reflejado o almacenado en la aplicación, permitiendo la ejecución arbitraria de JavaScript en el navegador.\n\n`;
+            
+            description += `La validación y neutralización del contenido no confiable es insuficiente, lo que permite al atacante ejecutar código arbitrario JavaScript y potencialmente realizar ataques del lado del cliente, incluyendo secuestro de sesiones de usuario, redirección maliciosa o manipulación del DOM. Dalfox identificó el punto de inyección, y la siguiente prueba de concepto confirma la vulnerabilidad:\n\n`;
+            
+            description += `Prueba de concepto (PoC):\n${payload}`;
 
             const vuln = {
                 type: 'XSS',
                 severity: this._mapSeverity(result.severity || 'medium'),
-                endpoint: endpoint,
+                endpoint: cleanEndpoint,
                 parameter: param,
-                description: description
+                description: description,
+                payload: payload,
+                xssType: xssTypeSpanish,
+                method: paramMethod
             };
 
-            this.logger.addLog(`✓ XSS detectado: ${endpoint} - Parámetro: ${param}`, 'success');
-            this.logger.addLog(`  Tipo: ${vulnType} | Severidad: ${vuln.severity} | Payload: ${payload.substring(0, 50)}${payload.length > 50 ? '...' : ''}`, 'info');
-
+            this.logger.addLog(`✓ XSS detectado: ${cleanEndpoint} - Parámetro: ${param}`, 'success');
+            this.logger.addLog(`  Tipo: ${xssTypeSpanish} | Severidad: ${vuln.severity} | Método: ${paramMethod}`, 'info');
+            this.logger.addLog(`  Payload: ${payload.substring(0, 50)}${payload.length > 50 ? '...' : ''}`, 'info');
 
             if (onVulnerabilityFound) {
                 try {
@@ -263,6 +280,40 @@ class DalfoxExecutor {
             }
         } else {
         }
+    }
+
+    _translateXSSType(injectType) {
+        // Si viene en formato [inHTML-URL] o [inJS-single-FORM]
+        let cleanType = injectType.replace(/[\[\]]/g, '').trim();
+        
+        // Separar el contexto del método
+        const parts = cleanType.split('-');
+        let context = '';
+        let method = '';
+        
+        // Detectar el prefijo (inHTML, inJS, inATTR)
+        const prefix = parts[0];
+        
+        // Simplificado a solo 3 categorías
+        if (prefix === 'inHTML') {
+            context = 'Inyección en contenido HTML';
+        } else if (prefix === 'inJS') {
+            context = 'Inyección en contenido JavaScript';
+        } else if (prefix === 'inATTR') {
+            context = 'Inyección en atributo HTML';
+        } else {
+            context = 'Cross-Site Scripting';
+        }
+        
+        // Extraer método si existe (URL o FORM)
+        if (parts.length >= 2) {
+            const lastPart = parts[parts.length - 1];
+            if (lastPart === 'URL' || lastPart === 'FORM') {
+                method = lastPart;
+            }
+        }
+        
+        return { context, method };
     }
 
     _mapSeverity(dalfoxSeverity) {

@@ -7,8 +7,7 @@ const { ScanFlags, UserAnswer, Score } = require('../value-objects/scan-value-ob
 
 const userAnswerSchema = new mongoose.Schema({
     pregunta_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Question', required: true },
-    respuesta_seleccionada_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Answer', required: true },
-    es_correcta: { type: Boolean, required: true },
+    respuestas_seleccionadas: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Answer', required: true }],
     puntos_obtenidos: { type: Number, default: 0 }
 });
 
@@ -22,15 +21,7 @@ const scanSchema = new mongoose.Schema({
         sqli: { type: Boolean, default: false }
     },
 
-    tipo_autenticacion: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'AuthType' 
-    },
-
-    credenciales: {
-        usuario_login: { type: String, maxlength: 100 },
-        password_login: { type: String, maxlength: 255 }
-    },
+    // Removed tipo_autenticacion and credenciales fields - not used
 
     estado: { 
         type: String, 
@@ -47,6 +38,17 @@ const scanSchema = new mongoose.Schema({
     fecha_fin: { type: Date },
     cookie: { type: String, maxlength: 255 },
 
+    // Progress tracking for resuming scans
+    current_phase: { type: String, default: null },
+    current_subphase: { type: String, default: null },
+    completed_phases: [{ type: String }],
+    completed_subphases: [{ type: String }],
+    discovered_endpoints: { type: Array, default: [] },
+    discovered_parameters: { type: Array, default: [] },
+    tested_endpoints_sqli: { type: Array, default: [] },  // URLs already tested for SQLi
+    tested_endpoints_xss: { type: Array, default: [] },   // URLs already tested for XSS
+    asked_phases: { type: Array, default: [] },           // Phases whose questions have been asked
+    
     vulnerabilidades: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Vulnerability' }],
 
     respuestas_usuario: [userAnswerSchema],
@@ -62,8 +64,10 @@ const scanSchema = new mongoose.Schema({
 const ScanModel = mongoose.models.Scan || mongoose.model('Scan', scanSchema);
 
 class Scan extends BaseModel {
-    #usuario_id; #alias; #url; #flags; #tipo_autenticacion; #estado; #gestor;
+    #usuario_id; #alias; #url; #flags; #estado; #gestor;
     #fecha_inicio; #fecha_fin; #cookie; #vulnerabilidades; #respuestas_usuario; #puntuacion;
+    #current_phase; #current_subphase; #completed_phases; #discovered_endpoints; #discovered_parameters;
+    #tested_endpoints_sqli; #tested_endpoints_xss; #asked_phases; #completed_subphases;
 
     constructor(data = {}) {
         super(data);
@@ -72,7 +76,6 @@ class Scan extends BaseModel {
         this.#alias = plainData.alias;
         this.#url = plainData.url;
         this.#flags = new ScanFlags(plainData.flags || {});
-        this.#tipo_autenticacion = plainData.tipo_autenticacion;
         this.#estado = plainData.estado || 'pendiente';
         this.#gestor = plainData.gestor;
         this.#fecha_inicio = plainData.fecha_inicio;
@@ -81,13 +84,22 @@ class Scan extends BaseModel {
         this.#vulnerabilidades = plainData.vulnerabilidades || [];
         this.#respuestas_usuario = (plainData.respuestas_usuario || []).map(ua => new UserAnswer(ua));
         this.#puntuacion = new Score(plainData.puntuacion || {});
+        this.#current_phase = plainData.current_phase || null;
+        this.#current_subphase = plainData.current_subphase || null;
+        this.#completed_phases = plainData.completed_phases || [];
+        this.#completed_subphases = plainData.completed_subphases || [];
+        this.#discovered_endpoints = plainData.discovered_endpoints || [];
+        this.#discovered_parameters = plainData.discovered_parameters || [];
+        this.#tested_endpoints_sqli = plainData.tested_endpoints_sqli || [];
+        this.#tested_endpoints_xss = plainData.tested_endpoints_xss || [];
+        this.#asked_phases = plainData.asked_phases || [];
+        this.#asked_phases = plainData.asked_phases || [];
     }
 
     get usuario_id() { return this.#usuario_id; }
     get alias() { return this.#alias; }
     get url() { return this.#url; }
     get flags() { return this.#flags; }
-    get tipo_autenticacion() { return this.#tipo_autenticacion; }
 
     get estado() { return this.#estado; }
     set estado(value) {
@@ -112,6 +124,33 @@ class Scan extends BaseModel {
 
     get puntuacion() { return this.#puntuacion; }
     set puntuacion(value) { this.#puntuacion = new Score(value); }
+
+    get current_phase() { return this.#current_phase; }
+    set current_phase(value) { this.#current_phase = value; }
+
+    get current_subphase() { return this.#current_subphase; }
+    set current_subphase(value) { this.#current_subphase = value; }
+
+    get completed_phases() { return this.#completed_phases; }
+    set completed_phases(value) { this.#completed_phases = value || []; }
+
+    get completed_subphases() { return this.#completed_subphases; }
+    set completed_subphases(value) { this.#completed_subphases = value || []; }
+
+    get discovered_endpoints() { return this.#discovered_endpoints; }
+    set discovered_endpoints(value) { this.#discovered_endpoints = value || []; }
+
+    get discovered_parameters() { return this.#discovered_parameters; }
+    set discovered_parameters(value) { this.#discovered_parameters = value || []; }
+
+    get tested_endpoints_sqli() { return this.#tested_endpoints_sqli; }
+    set tested_endpoints_sqli(value) { this.#tested_endpoints_sqli = value || []; }
+
+    get tested_endpoints_xss() { return this.#tested_endpoints_xss; }
+    set tested_endpoints_xss(value) { this.#tested_endpoints_xss = value || []; }
+
+    get asked_phases() { return this.#asked_phases; }
+    set asked_phases(value) { this.#asked_phases = value || []; }
 
     getDuration() {
         if (!this.#fecha_fin || !this.#fecha_inicio) return null;
@@ -139,8 +178,6 @@ class Scan extends BaseModel {
             alias: Joi.string().max(150).required(),
             url: Joi.string().uri().max(255).required(),
             flags: Joi.object({ xss: Joi.boolean(), sqli: Joi.boolean() }),
-            tipo_autenticacion: Joi.string(),
-            credenciales: Joi.object({ usuario_login: Joi.string().max(100), password_login: Joi.string().max(255) }),
             estado: Joi.string().valid('pendiente', 'en_progreso', 'finalizado', 'error'),
             gestor: Joi.string(),
             cookie: Joi.string().max(255),
@@ -153,7 +190,7 @@ class Scan extends BaseModel {
     static get Model() { return ScanModel; }
     static get debug() { return debug; }
 
-    toObject() { return buildObject(this, ['usuario_id', 'alias', 'url', 'flags', 'tipo_autenticacion', 'estado', 'gestor', 'fecha_inicio', 'fecha_fin', 'cookie', 'vulnerabilidades', 'respuestas_usuario', 'puntuacion']); }
+    toObject() { return buildObject(this, ['usuario_id', 'alias', 'url', 'flags', 'estado', 'gestor', 'fecha_inicio', 'fecha_fin', 'cookie', 'vulnerabilidades', 'respuestas_usuario', 'puntuacion', 'current_phase', 'current_subphase', 'completed_phases', 'completed_subphases', 'discovered_endpoints', 'discovered_parameters', 'tested_endpoints_sqli', 'tested_endpoints_xss', 'asked_phases']); }
 
     toDTO() {
         return {

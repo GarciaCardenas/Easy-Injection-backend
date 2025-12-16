@@ -148,7 +148,34 @@ router.get('/:id/report', auth, async (req, res) => {
                     'Consultas en línea (Inline queries)'
                 ];
                 
+                let foundPattern = null;
                 for (const pattern of techniquePatterns) {
+                    if (vuln.descripcion.includes(pattern)) {
+                        foundPattern = pattern;
+                        break;
+                    }
+                }
+                
+                // Si encontramos un patrón, actualizar el DTO
+                if (foundPattern) {
+                    dto.tipo_id = {
+                        _id: vulnerabilityType._id,
+                        nombre: vulnerabilityType.nombre,
+                        descripcion: foundPattern
+                    };
+                }
+            }
+            
+            // Para XSS, extraer el subtipo del contexto de inyección de la descripción si existe
+            if (vulnerabilityType?.nombre === 'XSS' && vuln.descripcion) {
+                // Buscar patrones de contextos XSS en la descripción (simplificados a 3 categorías)
+                const xssPatterns = [
+                    'Inyección en contenido HTML',
+                    'Inyección en contenido JavaScript',
+                    'Inyección en atributo HTML'
+                ];
+                
+                for (const pattern of xssPatterns) {
                     if (vuln.descripcion.includes(pattern)) {
                         // Crear un objeto tipo_id modificado solo para este DTO
                         dto.tipo_id = {
@@ -176,18 +203,28 @@ router.get('/:id/report', auth, async (req, res) => {
                     const answerDocs = await Answer.Model.find({ pregunta_id: userAnswer.pregunta_id });
                     const allAnswers = answerDocs.map(a => Answer.fromMongoose(a));
                     
-                    const selectedAnswerDoc = await Answer.Model.findById(userAnswer.respuesta_seleccionada_id);
-                    if (!selectedAnswerDoc) continue;
+                    // Obtener todas las respuestas seleccionadas (intentos)
+                    const respuestasSeleccionadas = [];
+                    if (userAnswer.respuestas_seleccionadas && userAnswer.respuestas_seleccionadas.length > 0) {
+                        for (const answerId of userAnswer.respuestas_seleccionadas) {
+                            const answerDoc = await Answer.Model.findById(answerId);
+                            if (answerDoc) {
+                                respuestasSeleccionadas.push(Answer.fromMongoose(answerDoc));
+                            }
+                        }
+                    }
                     
-                    const selectedAnswer = Answer.fromMongoose(selectedAnswerDoc);
                     const correctAnswer = allAnswers.find(a => a.es_correcta);
+                    const lastAnswer = respuestasSeleccionadas[respuestasSeleccionadas.length - 1];
+                    const isCorrect = lastAnswer?.es_correcta || false;
 
                     quizResults.push({
                         pregunta: question.toDTO(),
                         respuestas: allAnswers.map(a => a.toDTO()),
-                        respuesta_seleccionada: selectedAnswer.toDTO(),
+                        respuestas_seleccionadas: respuestasSeleccionadas.map(a => a.toDTO()),
                         respuesta_correcta: correctAnswer?.toDTO(),
-                        es_correcta: userAnswer.es_correcta,
+                        es_correcta: isCorrect,
+                        numero_intentos: respuestasSeleccionadas.length,
                         puntos_obtenidos: userAnswer.puntos_obtenidos
                     });
                 } catch (err) {
@@ -207,7 +244,9 @@ router.get('/:id/report', auth, async (req, res) => {
                     por_severidad: severityCounts
                 },
                 cuestionario: quizResults,
-                puntuacion: scan.puntuacion.toObject()
+                puntuacion: scan.puntuacion.toObject(),
+                discovered_endpoints: scanDoc.discovered_endpoints || [],
+                discovered_parameters: scanDoc.discovered_parameters || []
             }
         });
     } catch (error) {
@@ -222,15 +261,13 @@ router.get('/:id/report', auth, async (req, res) => {
 
 router.post('/', auth, async (req, res) => {
     try {
-        const { alias, url, flags, tipo_autenticacion, credenciales } = req.body;
+        const { alias, url, flags } = req.body;
 
         const scanData = {
             usuario_id: req.user._id,
             alias,
             url,
             flags: flags || { xss: false, sqli: false },
-            tipo_autenticacion,
-            credenciales,
             estado: 'pendiente'
         };
 
@@ -333,7 +370,7 @@ router.post('/:id/vulnerabilities', auth, async (req, res) => {
 
         await vulnerability.save();
 
-        await Scan.findByIdAndUpdate(req.params.id, {
+        await Scan.Model.findByIdAndUpdate(req.params.id, {
             $push: { vulnerabilidades: vulnerability._id }
         });
 
@@ -454,7 +491,6 @@ router.get('/search', auth, async (req, res) => {
     
     const scans = await Scan.find(filter)
       .sort({ fecha_inicio: -1 })
-      .populate('tipo_autenticacion')
       .populate('gestor');
     
     res.json(scans);
