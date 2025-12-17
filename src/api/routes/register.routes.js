@@ -1,4 +1,5 @@
 const express = require('express');
+const debug = require('debug')('easyinjection:api:register');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { User, validate } = require('../../models/user/user.model');
@@ -97,6 +98,10 @@ router.post('/', async (req, res) => {
         });
 
     } catch (error) {
+        debug('ERROR en POST /api/register:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('Request body:', req.body);
         console.error('Error en POST /api/register:', error);
         
         if (error.name === 'ValidationError') {

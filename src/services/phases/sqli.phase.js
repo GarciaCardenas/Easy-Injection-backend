@@ -1,3 +1,5 @@
+const debug = require('debug')('easyinjection:scan:sqli');
+
 class SQLiPhase {
     constructor(config, sqlmapExecutor, logger, questionHandler, discoveredParameters, vulnerabilities, stats, emitter) {
         this.config = config;
@@ -105,16 +107,20 @@ class SQLiPhase {
             this.logger.addLog(`Testeando SQLi en ${endpoint} con parámetros: ${params.map(p => p.name).join(', ')}`, 'info');
             
             try {
-                await this.sqlmapExecutor.testEndpoint(endpoint, params, 'detection', (vuln) => {
-                    // Call orchestrator's addVulnerability directly
-                    this.emitter.addVulnerability(vuln);
+                await this.sqlmapExecutor.testEndpoint(endpoint, params, 'detection', async (vuln) => {
+                    // Call orchestrator's addVulnerability directly and WAIT for it
+                    await this.emitter.addVulnerability(vuln);
                 });
                 
-                // Mark endpoint as tested
+                // Mark endpoint as tested AFTER testEndpoint completes (including all callbacks)
                 if (this.emitter.markEndpointTestedForSqli) {
                     this.emitter.markEndpointTestedForSqli(endpointObj);
                 }
             } catch (error) {
+                debug('ERROR en testEndpoint:', error);
+                debug('Error message:', error.message);
+                debug('Error stack:', error.stack);
+                debug('Endpoint:', endpoint);
                 this.logger.addLog(`Error testeando endpoint ${endpoint}: ${error.message}`, 'warning');
             }
         }
@@ -152,6 +158,10 @@ class SQLiPhase {
         try {
             await this.sqlmapExecutor.testParameter(param, 'fingerprint');
         } catch (error) {
+            debug('ERROR en fingerprintDatabase:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
+            debug('Param:', param);
             this.logger.addLog(`Error en fingerprinting: ${error.message}`, 'warning');
         }
     }
@@ -218,6 +228,10 @@ class SQLiPhase {
             await this.sqlmapExecutor.testParameter(param, 'exploit');
             this.logger.addLog('POC completado - Información básica extraída', 'success');
         } catch (error) {
+            debug('ERROR en proofOfConcept:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
+            debug('Param:', param);
             this.logger.addLog(`Error en explotación: ${error.message}`, 'warning');
         }
     }

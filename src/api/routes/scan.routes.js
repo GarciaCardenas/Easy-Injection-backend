@@ -1,8 +1,10 @@
 const express = require('express');
+const debug = require('debug')('easyinjection:api:scan');
 const auth = require('../middleware/auth.middleware');
 const { Scan } = require('../../models/scan/scan.model');
 const { Vulnerability } = require('../../models/scan/vulnerability.model');
 const { VulnerabilityType } = require('../../models/catalog/vulnerability-type.model');
+const { VulnerabilitySubtype } = require('../../models/catalog/vulnerability-subtype.model');
 const { SeverityLevel } = require('../../models/catalog/severity-level.model');
 const router = express.Router();
 
@@ -41,6 +43,9 @@ router.get('/', auth, async (req, res) => {
             scans: scansWithDetails
         });
     } catch (error) {
+        debug('ERROR en GET /api/scan:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
         console.error('Error en GET /api/scan:', error);
         res.status(500).json({
             success: false,
@@ -79,6 +84,10 @@ router.get('/:id', auth, async (req, res) => {
             }
         });
     } catch (error) {
+        debug('ERROR en GET /api/scan/:id:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('ScanId:', req.params.id);
         console.error('Error en GET /api/scan/:id:', error);
         res.status(500).json({
             success: false,
@@ -108,6 +117,7 @@ router.get('/:id/report', auth, async (req, res) => {
         const scan = Scan.fromMongoose(scanDoc);
         const vulnerabilityDocs = await Vulnerability.Model.find({ escaneo_id: scan._id })
             .populate('tipo_id', 'nombre descripcion')
+            .populate('subtipo_id', 'nombre descripcion')
             .populate('nivel_severidad_id', 'nombre nivel color');
 
         const severityCounts = {
@@ -121,6 +131,7 @@ router.get('/:id/report', auth, async (req, res) => {
             const vuln = Vulnerability.fromMongoose(v);
             const severityLevel = v.nivel_severidad_id;
             const vulnerabilityType = v.tipo_id;
+            const vulnerabilitySubtype = v.subtipo_id;
             
             // Contar por severidad
             const severity = severityLevel?.nombre?.toLowerCase();
@@ -136,56 +147,18 @@ router.get('/:id/report', auth, async (req, res) => {
             
             const dto = vuln.toDTO(severityLevel, vulnerabilityType);
             
-            // Para SQLi, extraer el subtipo de técnica de la descripción si existe
-            if (vulnerabilityType?.nombre === 'SQLi' && vuln.descripcion) {
-                // Buscar patrones de técnicas en la descripción
-                const techniquePatterns = [
-                    'Inyección ciega basada en booleanos (Boolean-based blind)',
-                    'Basada en errores (Error-based)',
-                    'Basada en consultas UNION (Union query-based)',
-                    'Consultas apiladas (Stacked queries)',
-                    'Inyección ciega basada en tiempo (Time-based blind)',
-                    'Consultas en línea (Inline queries)'
-                ];
-                
-                let foundPattern = null;
-                for (const pattern of techniquePatterns) {
-                    if (vuln.descripcion.includes(pattern)) {
-                        foundPattern = pattern;
-                        break;
+            // Si hay subtipo guardado en la BD, usarlo en lugar de extraer de la descripción
+            if (vulnerabilitySubtype) {
+                dto.tipo_id = {
+                    _id: vulnerabilityType._id,
+                    nombre: vulnerabilityType.nombre,
+                    descripcion: vulnerabilitySubtype.nombre,
+                    subtipo: {
+                        _id: vulnerabilitySubtype._id,
+                        nombre: vulnerabilitySubtype.nombre,
+                        descripcion: vulnerabilitySubtype.descripcion
                     }
-                }
-                
-                // Si encontramos un patrón, actualizar el DTO
-                if (foundPattern) {
-                    dto.tipo_id = {
-                        _id: vulnerabilityType._id,
-                        nombre: vulnerabilityType.nombre,
-                        descripcion: foundPattern
-                    };
-                }
-            }
-            
-            // Para XSS, extraer el subtipo del contexto de inyección de la descripción si existe
-            if (vulnerabilityType?.nombre === 'XSS' && vuln.descripcion) {
-                // Buscar patrones de contextos XSS en la descripción (simplificados a 3 categorías)
-                const xssPatterns = [
-                    'Inyección en contenido HTML',
-                    'Inyección en contenido JavaScript',
-                    'Inyección en atributo HTML'
-                ];
-                
-                for (const pattern of xssPatterns) {
-                    if (vuln.descripcion.includes(pattern)) {
-                        // Crear un objeto tipo_id modificado solo para este DTO
-                        dto.tipo_id = {
-                            _id: vulnerabilityType._id,
-                            nombre: vulnerabilityType.nombre,
-                            descripcion: pattern
-                        };
-                        break;
-                    }
-                }
+                };
             }
             
             return dto;
@@ -228,6 +201,8 @@ router.get('/:id/report', auth, async (req, res) => {
                         puntos_obtenidos: userAnswer.puntos_obtenidos
                     });
                 } catch (err) {
+                    debug('ERROR procesando quiz answer:', err);
+                    debug('Answer ID:', userAnswer._id);
                     console.error('Error processing quiz answer:', err);
                     continue;
                 }
@@ -250,6 +225,10 @@ router.get('/:id/report', auth, async (req, res) => {
             }
         });
     } catch (error) {
+        debug('ERROR en GET /api/scan/:id/report:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('ScanId:', req.params.id);
         console.error('Error fetching scan report:', error);
         res.status(500).json({
             success: false,
@@ -279,6 +258,10 @@ router.post('/', auth, async (req, res) => {
             scan: scan.toDTO()
         });
     } catch (error) {
+        debug('ERROR en POST /api/scan:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('Request body:', req.body);
         console.error('Error en POST /api/scan:', error);
         res.status(500).json({
             success: false,
@@ -314,6 +297,10 @@ router.put('/:id', auth, async (req, res) => {
             scan: scan.toDTO()
         });
     } catch (error) {
+        debug('ERROR en PUT /api/scan/:id:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('ScanId:', req.params.id);
         console.error('Error en PUT /api/scan/:id:', error);
         res.status(500).json({
             success: false,
@@ -344,6 +331,10 @@ router.delete('/:id', auth, async (req, res) => {
             message: 'Escaneo eliminado exitosamente'
         });
     } catch (error) {
+        debug('ERROR en DELETE /api/scan/:id:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('ScanId:', req.params.id);
         console.error('Error en DELETE /api/scan/:id:', error);
         res.status(500).json({
             success: false,
@@ -388,6 +379,10 @@ router.post('/:id/vulnerabilities', auth, async (req, res) => {
             }
         });
     } catch (error) {
+        debug('ERROR en POST /api/scan/:id/vulnerabilities:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('Request body:', req.body);
         res.status(500).json({
             success: false,
             error: 'Error interno del servidor'
@@ -429,6 +424,10 @@ router.post('/:id/start', auth, async (req, res) => {
             }
         });
     } catch (error) {
+        debug('ERROR en POST /api/scan/:id/start:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('ScanId:', req.params.id);
         res.status(500).json({
             success: false,
             error: 'Error interno del servidor'
@@ -462,6 +461,10 @@ router.get('/:id/status', auth, async (req, res) => {
             }
         });
     } catch (error) {
+        debug('ERROR en GET /api/scan/:id/status:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('ScanId:', req.params.id);
         res.status(500).json({
             success: false,
             error: 'Error interno del servidor'
@@ -495,6 +498,9 @@ router.get('/search', auth, async (req, res) => {
     
     res.json(scans);
   } catch (error) {
+    debug('ERROR en GET /api/scan/latest:', error);
+    debug('Error message:', error.message);
+    debug('Error stack:', error.stack);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -517,6 +523,9 @@ router.get('/scoreboard', auth, async (req, res) => {
     
     res.json({ scans });
   } catch (error) {
+    debug('ERROR en GET /api/scan/scoreboard:', error);
+    debug('Error message:', error.message);
+    debug('Error stack:', error.stack);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

@@ -1,3 +1,5 @@
+const debug = require('debug')('easyinjection:scan:xss-phase');
+
 class XSSPhase {
     constructor(config, dalfoxExecutor, logger, questionHandler, discoveredParameters, vulnerabilities, stats, emitter) {
         this.config = config;
@@ -117,18 +119,31 @@ class XSSPhase {
                 this.logger.addLog(`Fuzzing XSS en ${param.endpoint}`, 'info');
                 
                 try {
-                    await this.dalfoxExecutor.scanUrl(param.endpoint, (vuln) => {
-                        console.log(`[XSS] Vulnerabilidad detectada:`, 'info');
-                        console.log(`  - Endpoint: ${vuln.endpoint}`, 'info');
-                        console.log(`  - Parámetro: ${vuln.parameter}`, 'info');
-                        console.log(`  - Severidad: ${vuln.severity}`, 'info');
-                        console.log(`  - Descripción: ${vuln.description}`, 'info');
+                    debug('Llamando a dalfoxExecutor.scanUrl con callback...');
+                    debug('Endpoint:', param.endpoint);
+                    debug('Callback definido?', true);
+                    
+                    await this.dalfoxExecutor.scanUrl(param.endpoint, async (vuln) => {
+                        debug('[CALLBACK XSS] Vulnerabilidad recibida en callback');
+                        debug('[CALLBACK XSS] Vulnerabilidad:', JSON.stringify(vuln));
+                        debug('[CALLBACK XSS] this.emitter existe?', !!this.emitter);
+                        debug('[CALLBACK XSS] this.emitter.addVulnerability existe?', !!(this.emitter && this.emitter.addVulnerability));
                         
-                        // Call orchestrator's addVulnerability directly
-                        this.emitter.addVulnerability(vuln);
+                        debug(`[XSS] Vulnerabilidad detectada:`);
+                        debug(`  - Endpoint: ${vuln.endpoint}`);
+                        debug(`  - Parámetro: ${vuln.parameter}`);
+                        debug(`  - Severidad: ${vuln.severity}`);
+                        debug(`  - Descripción: ${vuln.description}`);
+                        
+                        // Call orchestrator's addVulnerability directly and WAIT for it
+                        debug('[CALLBACK XSS] Llamando a this.emitter.addVulnerability...');
+                        await this.emitter.addVulnerability(vuln);
+                        debug('[CALLBACK XSS] addVulnerability ejecutado');
                     });
                     
-                    // Mark endpoint as tested
+                    debug('dalfoxExecutor.scanUrl completado');
+                    
+                    // Mark endpoint as tested AFTER scanUrl completes (including all callbacks)
                     if (this.emitter.markEndpointTestedForXss) {
                         this.emitter.markEndpointTestedForXss(endpointObj);
                     }

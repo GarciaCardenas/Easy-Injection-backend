@@ -32,14 +32,11 @@ router.get("/", auth, async (req, res) => {
       .select("alias url fecha_inicio fecha_fin puntuacion vulnerabilidades respuestas_usuario");
 
     const scoreboard = userScans.map((scan, index) => {
-      // Count correct answers by checking if last selected answer is correct
-      const correctAnswers = scan.respuestas_usuario?.filter(ru => {
-        if (!ru.respuestas_seleccionadas || ru.respuestas_seleccionadas.length === 0) return false;
-        const lastAnswer = ru.respuestas_seleccionadas[ru.respuestas_seleccionadas.length - 1];
-        return lastAnswer?.es_correcta === true;
-      }).length || 0;
-      const totalQuestions = scan.respuestas_usuario?.length || 0;
       const vulnerabilitiesFound = scan.puntuacion?.vulnerabilidades_encontradas || 0;
+      const quizScore = scan.puntuacion?.puntos_cuestionario || 0;
+      const totalQuizScore = scan.puntuacion?.total_puntos_cuestionario || 60;
+      // Calcular puntaje ponderado en escala de 100
+      const quizScorePercentage = totalQuizScore > 0 ? (quizScore / totalQuizScore) * 100 : 0;
 
       return {
         rank: index + 1,
@@ -47,8 +44,7 @@ router.get("/", auth, async (req, res) => {
         scanAlias: scan.alias,
         scanUrl: scan.url,
         score: scan.puntuacion?.puntuacion_final || 0,
-        correctAnswers: correctAnswers,
-        totalQuestions: totalQuestions,
+        quizScore: Math.round(quizScorePercentage * 100) / 100, // Redondear a 2 decimales
         vulnerabilitiesFound: vulnerabilitiesFound,
         grade: scan.puntuacion?.calificacion || 'Regular',
         completedAt: scan.fecha_fin,

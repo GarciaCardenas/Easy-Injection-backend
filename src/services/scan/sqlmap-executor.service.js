@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const debug = require('debug')('easyinjection:scan:sqlmap');
 const os = require('os');
 
 class SqlmapExecutor {
@@ -34,6 +35,9 @@ class SqlmapExecutor {
             this.logger.addLog(`✓ sqlmap disponible: ${result.stdout?.slice(0,14)}`, 'success');
             return true;
         } catch (error) {
+            debug('ERROR en checkAvailability:', error);
+            debug('Error message:', error.message);
+            debug('Tool path:', this.toolConfig.path);
             this.logger.addLog(`⚠ sqlmap no encontrado. Asegúrate de que está instalado y en PATH`, 'warning');
             this.logger.addLog(`Ruta esperada: ${this.toolConfig.path}`, 'info');
             this.logger.addLog(`Detalles: ${error.message}`, 'error');
@@ -53,6 +57,8 @@ class SqlmapExecutor {
                 this.logger.addLog('Forzando terminación del proceso sqlmap', 'debug');
             }
         } catch (error) {
+            debug('ERROR en _gracefulKill:', error);
+            debug('Error message:', error.message);
             this.logger.addLog(`Error al terminar proceso: ${error.message}`, 'warning');
         }
     }
@@ -86,19 +92,19 @@ class SqlmapExecutor {
         this._addDbmsAndHeaders(args);
 
         // Log detallado solo en consola del servidor
-        console.log('\n[SQLmap Crawl] ===== COMANDO CRAWL =====');
-        console.log('[SQLmap Crawl] URL:', this.config.url);
-        console.log('[SQLmap Crawl] Profundidad:', this.toolConfig.crawlDepth);
-        console.log('[SQLmap Crawl] tmp-dir:', this.tmpDir);
-        console.log('[SQLmap Crawl] Args completos:', args);
-        console.log('[SQLmap Crawl] ====================================\n');
+        debug('\n[SQLmap Crawl] ===== COMANDO CRAWL =====');
+        debug('[SQLmap Crawl] URL:', this.config.url);
+        debug('[SQLmap Crawl] Profundidad:', this.toolConfig.crawlDepth);
+        debug('[SQLmap Crawl] tmp-dir:', this.tmpDir);
+        debug('[SQLmap Crawl] Args completos:', args);
+        debug('[SQLmap Crawl] ====================================\n');
 
         return new Promise(async (resolve, reject) => {
             const { executable, args: spawnArgs, spawnOpts } = this.getSpawnCommandForTool(this.toolConfig.path, args);
             
-            console.log('[SQLmap Crawl Spawn] Ejecutable:', executable);
-            console.log('[SQLmap Crawl Spawn] Argumentos:', spawnArgs);
-            console.log('[SQLmap Crawl Spawn] Comando completo:', executable, spawnArgs.join(' '), '\n');
+            debug('[SQLmap Crawl Spawn] Ejecutable:', executable);
+            debug('[SQLmap Crawl Spawn] Argumentos:', spawnArgs);
+            debug('[SQLmap Crawl Spawn] Comando completo:', executable, spawnArgs.join(' '), '\n');
             const proc = spawn(executable, spawnArgs, spawnOpts);
             this.activeProcesses.set('sqlmap-crawl', proc);
 
@@ -136,6 +142,9 @@ class SqlmapExecutor {
                     this.emitter.emit('crawler:finished', { csvPath });
                     resolve();
                 } catch (error) {
+                    debug('ERROR procesando resultados del crawl:', error);
+                    debug('Error message:', error.message);
+                    debug('Error stack:', error.stack);
                     this.logger.addLog(`Error procesando resultados del crawl: ${error.message}`, 'error');
                     this.emitter.emit('crawler:failed', { reason: error.message });
                     reject(error);
@@ -145,7 +154,7 @@ class SqlmapExecutor {
             proc.stdout.on('data', (data) => {
                 const output = data.toString();
                 // Solo en consola del servidor
-                console.log(`[sqlmap crawl stdout] ${output}`);
+                debug(`[sqlmap crawl stdout] ${output}`);
                 
                 buffer += output;
                 const lines = buffer.split('\n');
@@ -164,7 +173,7 @@ class SqlmapExecutor {
             proc.stderr.on('data', (data) => {
                 const error = data.toString();
                 // Solo en consola del servidor
-                console.error(`[sqlmap crawl stderr] ${error}`);
+                debug(`[sqlmap crawl stderr] ${error}`);
             });
 
             proc.on('close', async (code) => {
@@ -223,10 +232,15 @@ class SqlmapExecutor {
                                 }
                             }
                         } catch (entryError) {
+                            debug('ERROR en searchDir entry processing:', entryError);
+                            debug('Entry error:', entryError.message);
                             continue;
                         }
                     }
                 } catch (error) {
+                    debug('ERROR en searchDir:', error);
+                    debug('Error message:', error.message);
+                    debug('Dir:', dir);
                     this.logger.addLog(`Error buscando CSV en ${dir}: ${error.message}`, 'debug');
                 }
             };
@@ -242,6 +256,9 @@ class SqlmapExecutor {
             const selectedFile = files[0].path;
             return selectedFile;
         } catch (error) {
+            debug('ERROR en findLatestCrawlCsv:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
             this.logger.addLog(`Error buscando CSV: ${error.message}`, 'error');
             return null;
         }
@@ -337,6 +354,10 @@ class SqlmapExecutor {
                 parameters
             };
         } catch (error) {
+            debug('ERROR en processCrawlCsvToEndpointsAndParams:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
+            debug('CSV path:', csvPath);
             this.logger.addLog(`Error procesando CSV: ${error.message}`, 'error');
             throw error;
         }
@@ -364,11 +385,11 @@ class SqlmapExecutor {
 
         const getTargetsPath = path.join(outputDir, 'get_targets.txt');
         fs.writeFileSync(getTargetsPath, getTargets.join('\n') + (getTargets.length > 0 ? '\n' : ''), 'utf-8');
-        console.log(`✓ get_targets.txt generado: ${getTargets.length} targets`, 'debug');
+        debug(`✓ get_targets.txt generado: ${getTargets.length} targets`);
 
         const postTargetsPath = path.join(outputDir, 'post_targets.txt');
         fs.writeFileSync(postTargetsPath, postTargets.join('\n') + (postTargets.length > 0 ? '\n' : ''), 'utf-8');
-        console.log(`✓ post_targets.txt generado: ${postTargets.length} targets`, 'debug');
+        debug(`✓ post_targets.txt generado: ${postTargets.length} targets`);
 
         return {
             getTargetsPath,
@@ -380,7 +401,7 @@ class SqlmapExecutor {
 
     async processGetTargets(getTargetsPath, onEndpointDiscovered, onVulnerabilityFound, options = {}) {
         if (!fs.existsSync(getTargetsPath)) {
-            console.log(`get_targets.txt no encontrado: ${getTargetsPath}`, 'warning');
+            debug(`get_targets.txt no encontrado: ${getTargetsPath}`);
             return;
         }
 
@@ -418,6 +439,9 @@ class SqlmapExecutor {
                     await options.dalfoxExecutor.scanUrl(url, onVulnerabilityFound);
                 }
             } catch (error) {
+                debug('ERROR en processGetTargets:', error);
+                debug('Error message:', error.message);
+                debug('URL:', url);
                 this.logger.addLog(`Error procesando GET target ${url}: ${error.message}`, 'warning');
             }
         }
@@ -425,7 +449,7 @@ class SqlmapExecutor {
 
     async processPostTargets(postTargetsPath, onEndpointDiscovered, onVulnerabilityFound, options = {}) {
         if (!fs.existsSync(postTargetsPath)) {
-            console.log(`post_targets.txt no encontrado: ${postTargetsPath}`, 'warning');
+            debug(`post_targets.txt no encontrado: ${postTargetsPath}`);
             return;
         }
 
@@ -473,6 +497,10 @@ class SqlmapExecutor {
                 }
 
             } catch (error) {
+                debug('ERROR en processPostTargets:', error);
+                debug('Error message:', error.message);
+                debug('URL:', url);
+                debug('Post data:', postData);
                 this.logger.addLog(`Error procesando POST target ${url}: ${error.message}`, 'warning');
             }
         }
@@ -509,6 +537,9 @@ class SqlmapExecutor {
 
                 await this.testParameter(param, 'detection', onVulnerabilityFound);
             } catch (error) {
+                debug('ERROR en _testUrlWithSqlmap (full test):', error);
+                debug('Error message:', error.message);
+                debug('URL:', url);
                 this.logger.addLog(`Error testeando URL ${url}: ${error.message}`, 'warning');
             }
         } else {
@@ -528,6 +559,10 @@ class SqlmapExecutor {
 
                     await this.testParameter(param, 'detection', onVulnerabilityFound);
                 } catch (error) {
+                    debug('ERROR en _testUrlWithSqlmap (param test):', error);
+                    debug('Error message:', error.message);
+                    debug('Param name:', paramName);
+                    debug('URL:', url);
                     this.logger.addLog(`Error testeando parámetro ${paramName}: ${error.message}`, 'warning');
                 }
             }
@@ -614,12 +649,12 @@ class SqlmapExecutor {
         }
 
         // Log detallado solo en consola del servidor (no en frontend)
-        console.log('\n[SQLmap] ===== COMANDO A EJECUTAR =====');
-        console.log('[SQLmap] Endpoint:', endpoint);
-        console.log('[SQLmap] Parámetros:', paramNames);
-        if (postData) console.log('[SQLmap] POST Data:', postData);
-        console.log('[SQLmap] Fase:', phase);
-        console.log('[SQLmap] Args completos:', args);
+        debug('\n[SQLmap] ===== COMANDO A EJECUTAR =====');
+        debug('[SQLmap] Endpoint:', endpoint);
+        debug('[SQLmap] Parámetros:', paramNames);
+        if (postData) debug('[SQLmap] POST Data:', postData);
+        debug('[SQLmap] Fase:', phase);
+        debug('[SQLmap] Args completos:', args);
         console.log('[SQLmap] ====================================\n');
 
         return new Promise((resolve) => {
@@ -679,6 +714,10 @@ class SqlmapExecutor {
                         await this._parseResultsCSV(csvResultPath, onVulnerabilityFound, pocData);
                         this.logger.addLog(`Completado escaneo SQLi para ${logContext}`, 'info');
                     } catch (error) {
+                        debug('ERROR leyendo CSV de resultados:', error);
+                        debug('Error message:', error.message);
+                        debug('CSV path:', csvResultPath);
+                        debug('Log context:', logContext);
                         this.logger.addLog(`Error leyendo CSV de resultados: ${error.message}`, 'warning');
                     }
                 } else {
@@ -762,6 +801,8 @@ class SqlmapExecutor {
             const header = lines[0];
             console.log(`CSV Header: ${header}`, 'debug');
 
+            const callbackPromises = []; // Track async callbacks
+
             // Procesar cada línea de resultados
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i];
@@ -819,18 +860,32 @@ class SqlmapExecutor {
                     this.logger.addLog(`✓ Vulnerabilidad SQLi encontrada: ${targetUrl} - ${parameter} (${translatedTechniques})`, 'success');
 
                     if (onVulnerabilityFound) {
-                        onVulnerabilityFound({
+                        const callbackResult = onVulnerabilityFound({
                             type: 'SQLi',
                             severity: severity,
                             endpoint: targetUrl,
                             parameter: parameter || 'unknown',
                             description: description,
-                            techniqueType: translatedTechniques // Pasar el tipo de técnica
+                            techniqueType: translatedTechniques, // Pasar el tipo de técnica
+                            subtype: translatedTechniques // Usar la técnica traducida como subtipo
                         });
+                        
+                        // If callback returns a promise, track it
+                        if (callbackResult && callbackResult.then) {
+                            callbackPromises.push(callbackResult);
+                        }
                     }
                 }
             }
+            
+            // Wait for all async callbacks to complete
+            debug(`Esperando ${callbackPromises.length} callbacks asíncronos de SQLi...`);
+            await Promise.all(callbackPromises);
+            debug('Todos los callbacks de SQLi completados');
         } catch (error) {
+            debug('ERROR en _parseResultsCSV:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
             console.log(`Error parseando CSV: ${error.message}`);
             throw error;
         }
@@ -954,6 +1009,10 @@ class SqlmapExecutor {
         try {
             return await this._executeProcess(executable, finalArgs, spawnOpts, timeout, autoRespond, autoRespondRegex);
         } catch (error) {
+            debug('ERROR en executeCommand:', error);
+            debug('Error message:', error.message);
+            debug('Executable:', executable);
+            debug('Args:', finalArgs);
             if (useShellFallback && !spawnOpts.shell) {
                 const safeArgs = finalArgs.map(a => typeof a === 'string' && a.includes(' ') ? `"${a}"` : a).join(' ');
                 const shellCmd = `${executable} ${safeArgs}`;
@@ -989,6 +1048,8 @@ class SqlmapExecutor {
                         responded = true;
                     }
                 } catch (e) {
+                    debug('ERROR en auto-respond:', e);
+                    debug('Error message:', e.message);
                     this.logger.addLog(`Auto-respond failed: ${e.message}`, 'debug');
                 }
             };

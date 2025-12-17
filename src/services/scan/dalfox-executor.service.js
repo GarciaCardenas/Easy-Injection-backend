@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const debug = require('debug')('easyinjection:scan:dalfox');
 
 class DalfoxExecutor {
     constructor(config, logger, emitter, activeProcesses) {
@@ -61,6 +62,7 @@ class DalfoxExecutor {
 
             let jsonBuffer = '';
             let processedVulnerabilities = new Set();
+            let callbackPromises = []; // Track async callbacks
 
             let streamBuffer = '';
 
@@ -98,16 +100,29 @@ class DalfoxExecutor {
                     const trimmed = objText.trim();
                     try {
                         const result = JSON.parse(trimmed);
+                        debug('JSON parseado:', result);
+                        debug('Tipo de resultado:', result.type);
+                        
                         if (result.type === 'V' || result.type === 'POC' || result.type === 'VULN') {
+                            debug('Vulnerabilidad detectada! Tipo:', result.type);
                             const vulnKey = `${result.param || 'unknown'}-${result.payload || 'unknown'}`;
+                            debug('Clave de vulnerabilidad:', vulnKey);
+                            
                             if (!processedVulnerabilities.has(vulnKey)) {
+                                debug('Vulnerabilidad nueva, procesando...');
                                 processedVulnerabilities.add(vulnKey);
-                                this._parseOutput(result, onVulnerabilityFound);
+                                const callbackResult = this._parseOutput(result, onVulnerabilityFound);
+                                if (callbackResult && callbackResult.then) {
+                                    callbackPromises.push(callbackResult);
+                                }
                             } else {
+                                debug('Vulnerabilidad duplicada, ignorando');
                             }
                         } else {
+                            debug('Tipo de resultado no es vulnerabilidad:', result.type);
                         }
                     } catch (parseErr) {
+                        debug('Error parseando JSON:', parseErr.message);
                     }
                 }
             });
@@ -140,7 +155,7 @@ class DalfoxExecutor {
                 }
             });
 
-            proc.on('close', (code) => {
+            proc.on('close', async (code) => {
                 this.activeProcesses.delete(processKey);
 
                 if (jsonBuffer.trim()) {
@@ -152,7 +167,10 @@ class DalfoxExecutor {
                                 const vulnKey = `${result.param || 'unknown'}-${result.payload || 'unknown'}`;
                                 if (!processedVulnerabilities.has(vulnKey)) {
                                     processedVulnerabilities.add(vulnKey);
-                                    this._parseOutput(result, onVulnerabilityFound);
+                                    const callbackResult = this._parseOutput(result, onVulnerabilityFound);
+                                    if (callbackResult && callbackResult.then) {
+                                        callbackPromises.push(callbackResult);
+                                    }
                                 } else {
                                 }
                             } else {
@@ -163,6 +181,11 @@ class DalfoxExecutor {
                     }
                 } else {
                 }
+                
+                // Wait for all async callbacks to complete before resolving
+                debug(`Esperando ${callbackPromises.length} callbacks asíncronos...`);
+                await Promise.all(callbackPromises);
+                debug('Todos los callbacks completados');
                 
                 resolve();
             });
@@ -206,8 +229,12 @@ class DalfoxExecutor {
 
     _parseOutput(result, onVulnerabilityFound) {
         const vulnType = result.type;
+        
+        debug('_parseOutput llamado con resultado tipo:', vulnType);
+        debug('Resultado completo:', JSON.stringify(result));
 
         if (vulnType === 'V' || vulnType === 'POC' || vulnType === 'VULN') {
+            debug('Es una vulnerabilidad confirmada, procesando...');
             let endpoint = 'unknown';
             
             if (result.data) {
@@ -245,6 +272,10 @@ class DalfoxExecutor {
             const xssTypeSpanish = xssTypeInfo.context || 'Cross-Site Scripting';
             const paramMethod = xssTypeInfo.method || (method === 'POST' ? 'POST' : 'GET');
             
+            debug('xssTypeInfo:', xssTypeInfo);
+            debug('xssTypeSpanish:', xssTypeSpanish);
+            debug('paramMethod:', paramMethod);
+            
             // Construir descripción según el nuevo formato usando el endpoint limpio
             let description = `El endpoint ${cleanEndpoint} presenta una vulnerabilidad Cross-Site Scripting (XSS) de tipo ${xssTypeSpanish}, debido a una sanitización insuficiente de los datos proporcionados por el usuario. Durante el análisis se comprobó que el parámetro ${param} de tipo ${paramMethod} acepta contenido malicioso que posteriormente es reflejado o almacenado en la aplicación, permitiendo la ejecución arbitraria de JavaScript en el navegador.\n\n`;
             
@@ -260,6 +291,7 @@ class DalfoxExecutor {
                 description: description,
                 payload: payload,
                 xssType: xssTypeSpanish,
+                subtype: xssTypeInfo.context, // Usar el contexto como subtipo
                 method: paramMethod
             };
 
@@ -267,12 +299,25 @@ class DalfoxExecutor {
             this.logger.addLog(`  Tipo: ${xssTypeSpanish} | Severidad: ${vuln.severity} | Método: ${paramMethod}`, 'info');
             this.logger.addLog(`  Payload: ${payload.substring(0, 50)}${payload.length > 50 ? '...' : ''}`, 'info');
 
+            debug('=== VULNERABILIDAD XSS DETECTADA ===');
+            debug('Vulnerabilidad parseada:', JSON.stringify(vuln));
+            debug('onVulnerabilityFound existe?', !!onVulnerabilityFound);
+            debug('onVulnerabilityFound tipo:', typeof onVulnerabilityFound);
+
             if (onVulnerabilityFound) {
                 try {
-                    onVulnerabilityFound(vuln);
+                    debug('Llamando a onVulnerabilityFound callback...');
+                    const result = onVulnerabilityFound(vuln);
+                    debug('Callback ejecutado exitosamente');
+                    // Return the result in case it's a promise
+                    return result;
                 } catch (cbErr) {
+                    debug('ERROR EN CALLBACK onVulnerabilityFound:', cbErr);
+                    debug('Error message:', cbErr.message);
+                    debug('Error stack:', cbErr.stack);
                 }
             } else {
+                debug('WARNING: onVulnerabilityFound es null/undefined, no se puede notificar vulnerabilidad');
             }
         } else if (result.type === 'GREP' || result.type === 'INFO') {
             if (result.message && !result.message.match(/Loopback|IPAddressSpace/i)) {

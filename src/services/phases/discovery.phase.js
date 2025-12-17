@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const debug = require('debug')('easyinjection:scan:discovery');
 
 class DiscoveryPhase {
     constructor(config, sqlmapExecutor, logger, questionHandler, emitter) {
@@ -96,13 +97,13 @@ class DiscoveryPhase {
                 this.addParameter(param);
             }
             
-            console.log(`✓ Procesados ${result.endpoints.length} endpoint(s) y ${result.parameters.length} parámetro(s) del CSV`, 'success');
+            debug(`✓ Procesados ${result.endpoints.length} endpoint(s) y ${result.parameters.length} parámetro(s) del CSV`);
             
             if (targetsResult) {
-                console.log(`✓ Archivos targets.txt generados: ${targetsResult.getCount} GET, ${targetsResult.postCount} POST`, 'debug');
+                debug(`✓ Archivos targets.txt generados: ${targetsResult.getCount} GET, ${targetsResult.postCount} POST`);
             }
         } catch (error) {
-            console.log(`Error procesando CSV: ${error.message}`, 'error');
+            debug(`Error procesando CSV: ${error.message}`);
             throw error;
         }
     }

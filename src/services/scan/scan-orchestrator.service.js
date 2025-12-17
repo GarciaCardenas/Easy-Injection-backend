@@ -2,6 +2,7 @@ const EventEmitter = require('events');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const debug = require('debug')('easyinjection:scan:orchestrator');
 
 const { validateAndNormalizeConfig } = require('./config-validator.service');
 const Logger = require('./logger.service');
@@ -11,6 +12,8 @@ const DalfoxExecutor = require('./dalfox-executor.service');
 const DiscoveryPhase = require('../phases/discovery.phase');
 const SQLiPhase = require('../phases/sqli.phase');
 const XSSPhase = require('../phases/xss.phase');
+const { Scan } = require('../../models/scan/scan.model');
+const { VulnerabilitySubtype } = require('../../models/catalog/vulnerability-subtype.model');
 
 class ScanOrchestrator extends EventEmitter {
     constructor(scanId, scanConfig, previousState = null) {
@@ -37,6 +40,7 @@ class ScanOrchestrator extends EventEmitter {
         this.testedEndpointsSqli = previousState?.tested_endpoints_sqli || [];
         this.testedEndpointsXss = previousState?.tested_endpoints_xss || [];
         this.askedPhases = previousState?.asked_phases || [];
+        this.autoSaveInterval = null;
         
         this.stats = {
             totalRequests: 0,
@@ -104,10 +108,26 @@ class ScanOrchestrator extends EventEmitter {
     
     async start() {
         try {
+            debug('=== INICIO DE ESCANEO ===');
+            debug('ScanId:', this.scanId);
+            debug('Config:', JSON.stringify(this.config));
+            debug('Phases completed:', this.completedPhases);
+            
+            // Actualizar estado inmediatamente para detectar desconexiones
+            debug('Actualizando estado a pendiente...');
+            const scanUpdate = await Scan.Model.findByIdAndUpdate(this.scanId, { estado: 'pendiente' });
+            debug('Estado actualizado:', scanUpdate ? 'OK' : 'FAILED');
+            
             this.isStopped = false;
             this.isPaused = false;
             
+            // Iniciar auto-save periódico
+            debug('Iniciando auto-save periódico...');
+            this.startAutoSave();
+            debug('Auto-save iniciado');
+            
             const isResuming = this.completedPhases.length > 0;
+            debug('Es reanudación?', isResuming);
             if (isResuming) {
                 this.logger.addLog('Reanudando escaneo desde fase guardada...', 'info');
                 await this.loadExistingResults();
@@ -145,6 +165,7 @@ class ScanOrchestrator extends EventEmitter {
             }
             
             if (!this.isStopped) {
+                this.stopAutoSave();
                 this.emit('scan:completed', { 
                     scanId: this.scanId,
                     vulnerabilities: this.vulnerabilities,
@@ -153,10 +174,14 @@ class ScanOrchestrator extends EventEmitter {
                 });
             }
         } catch (error) {
+            debug('ERROR CRÍTICO EN START:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
             if (!this.isStopped) {
                 this.logger.addLog(`Error crítico: ${error.message}`, 'error');
                 this.emit('scan:error', { scanId: this.scanId, error: error.message });
             }
+            this.stopAutoSave();
             this.killAllProcesses();
             throw error;
         }
@@ -189,6 +214,24 @@ class ScanOrchestrator extends EventEmitter {
             }
         }
         this.activeProcesses.clear();
+    }
+
+    startAutoSave() {
+        // Guardar progreso cada 15 segundos mientras el scan está activo
+        this.autoSaveInterval = setInterval(() => {
+            if (!this.isPaused && !this.isStopped) {
+                this.saveProgress().catch(err => {
+                    this.logger.addLog(`Error en auto-save: ${err.message}`, 'error');
+                });
+            }
+        }, 15000);
+    }
+
+    stopAutoSave() {
+        if (this.autoSaveInterval) {
+            clearInterval(this.autoSaveInterval);
+            this.autoSaveInterval = null;
+        }
     }
 
     setCurrentSubphase(subphase) {
@@ -259,8 +302,6 @@ class ScanOrchestrator extends EventEmitter {
 
     async saveProgress() {
         try {
-            const Scan = require('../../models/scan/scan.model').Scan;
-            
             await Scan.Model.findByIdAndUpdate(
                 this.scanId,
                 {
@@ -279,7 +320,7 @@ class ScanOrchestrator extends EventEmitter {
                 { new: true, runValidators: false }
             );
             
-            console.log('Progreso guardado', 'info');
+            debug('Progreso guardado exitosamente');
         } catch (error) {
             this.logger.addLog(`Error guardando progreso: ${error.message}`, 'warning');
         }
@@ -287,7 +328,6 @@ class ScanOrchestrator extends EventEmitter {
 
     async loadExistingResults() {
         try {
-            const Scan = require('../../models/scan/scan.model').Scan;
             const Vulnerability = require('../../models/scan/vulnerability.model').Vulnerability;
             
             const scanDoc = await Scan.Model.findById(this.scanId)
@@ -327,7 +367,7 @@ class ScanOrchestrator extends EventEmitter {
                     this.vulnerabilities.forEach(vuln => {
                         this.emit('vulnerability:found', vuln);
                     });
-                    console.log(`Notificadas ${this.vulnerabilities.length} vulnerabilidades al frontend`, 'info');
+                    debug(`Notificadas ${this.vulnerabilities.length} vulnerabilidades al frontend`);
                 }
                 
                 // Load existing question results
@@ -355,7 +395,7 @@ class ScanOrchestrator extends EventEmitter {
                     this.questionResults.forEach(result => {
                         this.emit('question:result', result);
                     });
-                    console.log(`Notificadas ${this.questionResults.length} respuestas al frontend`, 'info');
+                    debug(`Notificadas ${this.questionResults.length} respuestas al frontend`);
                 }
             }
         } catch (error) {
@@ -393,26 +433,40 @@ class ScanOrchestrator extends EventEmitter {
         return await phase.run();
     }
 
-    addVulnerability(vuln) {
+    async addVulnerability(vuln) {
+        debug('=== addVulnerability LLAMADO ===');
+        debug('Vulnerabilidad recibida:', JSON.stringify(vuln));
+        debug('Vulnerabilidades actuales:', this.vulnerabilities.length);
+        
         if (!this.vulnerabilities.some(v => 
             v.type === vuln.type && 
             v.endpoint === vuln.endpoint && 
             v.parameter === vuln.parameter
         )) {
+            debug('Vulnerabilidad no duplicada, agregando...');
             this.vulnerabilities.push(vuln);
             this.stats.vulnerabilitiesFound++;
             this.logger.addLog(`Vulnerabilidad encontrada: ${vuln.type} en ${vuln.endpoint}`, 'success');
             
             // Emit event for frontend to display in real-time
+            debug('Emitiendo evento vulnerability:found...');
             this.emit('vulnerability:found', vuln);
             
-            // Save vulnerability to DB immediately
+            // Save vulnerability to DB immediately and WAIT for it to complete
+            debug('Iniciando guardado de vulnerabilidad en BD...');
             this.logger.addLog(`Iniciando guardado de vulnerabilidad en BD...`, 'info');
-            this.saveVulnerabilityToDb(vuln).catch(err => {
+            try {
+                await this.saveVulnerabilityToDb(vuln);
+                debug('Vulnerabilidad guardada exitosamente en BD');
+            } catch (err) {
+                debug('ERROR EN saveVulnerabilityToDb:', err);
+                debug('Error message:', err.message);
+                debug('Error stack:', err.stack);
                 this.logger.addLog(`ERROR CRÍTICO guardando vulnerabilidad: ${err.message}`, 'error');
-                console.error('ERROR COMPLETO:', err);
-            });
+                throw err; // Re-throw to propagate error to caller
+            }
         } else {
+            debug('Vulnerabilidad duplicada, ignorando');
             this.logger.addLog(`Vulnerabilidad duplicada ignorada: ${vuln.type} en ${vuln.endpoint}`, 'info');
         }
     }
@@ -424,10 +478,10 @@ class ScanOrchestrator extends EventEmitter {
         debug('ScanId actual: %s', this.scanId);
         
         try {
-            const Scan = require('../../models/scan/scan.model').Scan;
             const Vulnerability = require('../../models/scan/vulnerability.model').Vulnerability;
             const VulnerabilityType = require('../../models/catalog/vulnerability-type.model').VulnerabilityType;
             const SeverityLevel = require('../../models/catalog/severity-level.model').SeverityLevel;
+            // VulnerabilitySubtype ya está importado al inicio del archivo
             
             debug('Modelos cargados correctamente');
             
@@ -461,11 +515,41 @@ class ScanOrchestrator extends EventEmitter {
                 this.logger.addLog(msg, 'warning');
                 return;
             }
+
+            // Buscar el subtipo si se proporcionó
+            let vulnSubtype = null;
+            if (vuln.subtype) {
+                debug('Buscando subtipo de vulnerabilidad: %s para tipo: %s', vuln.subtype, vuln.type);
+                vulnSubtype = await VulnerabilitySubtype.Model.findOne({ 
+                    tipo_id: vulnType._id,
+                    nombre: vuln.subtype 
+                });
+                debug('Subtipo encontrado: %O', vulnSubtype);
+                
+                if (!vulnSubtype) {
+                    debug('ADVERTENCIA: No se encontró el subtipo exacto "%s", buscando alternativas...', vuln.subtype);
+                    // Si no se encuentra exactamente, intentar buscar por coincidencia parcial
+                    const subtypes = await VulnerabilitySubtype.Model.find({ tipo_id: vulnType._id });
+                    debug('Subtipos disponibles: %O', subtypes.map(s => s.nombre));
+                    
+                    // Para SQLi, buscar por la primera técnica si viene separado por comas
+                    if (vuln.type === 'SQLi' && vuln.subtype.includes(',')) {
+                        const firstTechnique = vuln.subtype.split(',')[0].trim();
+                        debug('Buscando primera técnica: %s', firstTechnique);
+                        vulnSubtype = await VulnerabilitySubtype.Model.findOne({ 
+                            tipo_id: vulnType._id,
+                            nombre: firstTechnique
+                        });
+                        debug('Subtipo encontrado con primera técnica: %O', vulnSubtype);
+                    }
+                }
+            }
             
             // Create vulnerability document
             const vulnData = {
                 escaneo_id: this.scanId,
                 tipo_id: vulnType._id,
+                subtipo_id: vulnSubtype ? vulnSubtype._id : null,
                 nivel_severidad_id: severityLevel._id,
                 parametro_afectado: vuln.parameter,
                 url_afectada: vuln.endpoint,
@@ -507,7 +591,8 @@ class ScanOrchestrator extends EventEmitter {
             debug('ERROR CAPTURADO: %s', error.message);
             debug('Stack trace: %s', error.stack);
             this.logger.addLog(`Error en saveVulnerabilityToDb: ${error.message}`, 'error');
-            console.error('ERROR COMPLETO AL GUARDAR VULNERABILIDAD:', error);
+            debug('ERROR COMPLETO AL GUARDAR VULNERABILIDAD:', error);
+            debug('Error stack:', error.stack);
             throw error; // Re-lanzar para que se capture en el catch de addVulnerability
         }
     }
@@ -600,12 +685,18 @@ class ScanOrchestrator extends EventEmitter {
     pause() {
         if (this.isStopped) return;
         
+        this.stopAutoSave();
         this.isPaused = true;
         this.questionHandler.isPaused = true;
         
         // Save progress when pausing
         this.saveProgress().catch(err => {
             this.logger.addLog(`Error guardando progreso al pausar: ${err.message}`, 'warning');
+        });
+        
+        // Actualizar estado a pausado en BD
+        Scan.Model.findByIdAndUpdate(this.scanId, { estado: 'pendiente' }).catch(err => {
+            debug('Error actualizando estado a pausado (pendiente):', err);
         });
         
         this.logger.addLog('Escaneo pausado por el usuario', 'warning');
@@ -617,6 +708,7 @@ class ScanOrchestrator extends EventEmitter {
         
         this.isPaused = false;
         this.questionHandler.isPaused = false;
+        this.startAutoSave();
         if (this.questionHandler.pauseResolver) {
             this.questionHandler.pauseResolver();
             this.questionHandler.pauseResolver = null;
@@ -627,6 +719,8 @@ class ScanOrchestrator extends EventEmitter {
 
     stop() {
         if (this.isStopped) return;
+        
+        this.stopAutoSave();
         
         // Save progress before stopping
         this.saveProgress().catch(err => {

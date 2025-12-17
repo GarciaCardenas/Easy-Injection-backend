@@ -1,4 +1,5 @@
 const express = require('express');
+const debug = require('debug')('easyinjection:api:user');
 const bcrypt = require('bcrypt');
 const auth = require('../middleware/auth.middleware');
 const { User } = require('../../models/user/user.model');
@@ -31,6 +32,10 @@ router.get('/profile', auth, async (req, res) => {
             user: dto
         });
     } catch (error) {
+        debug('ERROR en GET /api/user/profile:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('User ID:', req.user?._id);
         console.error('Error en GET /api/user/profile:', error);
         res.status(500).json({ 
             error: 'Error interno del servidor',
@@ -88,6 +93,10 @@ router.put('/profile', auth, async (req, res) => {
             user: user.toDTO()
         });
     } catch (error) {
+        debug('ERROR en PUT /api/user/profile:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('User ID:', req.user?._id);
         res.status(500).json({ 
             error: 'Error interno del servidor' 
         });
@@ -138,6 +147,10 @@ router.put('/password', auth, async (req, res) => {
             message: 'Contraseña actualizada exitosamente'
         });
     } catch (error) {
+        debug('ERROR en PUT /api/user/password:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('User ID:', req.user?._id);
         res.status(500).json({ 
             error: 'Error interno del servidor' 
         });
@@ -146,10 +159,36 @@ router.put('/password', auth, async (req, res) => {
 
 router.post('/logout', auth, async (req, res) => {
     try {
+        const sessionId = req.user.sessionId;
+        
+        if (sessionId) {
+            const userDoc = await User.Model.findById(req.user._id);
+            const user = User.fromMongoose(userDoc);
+            
+            // Remove the current session
+            user.removeSession(sessionId);
+            await user.save();
+        }
+        
+        res.clearCookie('auth_token', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax'
+        });
+        
+        res.clearCookie('refresh_token', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax'
+        });
+        
         res.json({
             message: 'Sesión cerrada exitosamente'
         });
     } catch (error) {
+        debug('ERROR en POST /api/user/logout:', error);
+        debug('Error message:', error.message);
+        debug('User ID:', req.user?._id);
         res.status(500).json({ 
             error: 'Error interno del servidor' 
         });
@@ -173,6 +212,10 @@ router.get('/sessions', auth, async (req, res) => {
             sessions: sessions
         });
     } catch (error) {
+        debug('ERROR en GET /api/user/sessions:', error);
+        debug('Error message:', error.message);
+        debug('Error stack:', error.stack);
+        debug('User ID:', req.user?._id);
         res.status(500).json({ 
             error: 'Error interno del servidor' 
         });
@@ -187,6 +230,10 @@ router.delete('/sessions/:sessionId', auth, async (req, res) => {
             message: 'Sesión cerrada exitosamente'
         });
     } catch (error) {
+        debug('ERROR en DELETE /api/user/sessions/:sessionId:', error);
+        debug('Error message:', error.message);
+        debug('Session ID:', req.params.sessionId);
+        debug('User ID:', req.user?._id);
         res.status(500).json({ 
             error: 'Error interno del servidor' 
         });
@@ -199,6 +246,9 @@ router.delete('/sessions', auth, async (req, res) => {
             message: 'Todas las sesiones cerradas exitosamente'
         });
     } catch (error) {
+        debug('ERROR en DELETE /api/user/sessions:', error);
+        debug('Error message:', error.message);
+        debug('User ID:', req.user?._id);
         res.status(500).json({ 
             error: 'Error interno del servidor' 
         });
@@ -231,6 +281,10 @@ router.get('/statistics', auth, async (req, res) => {
     
     res.json(statistics);
   } catch (error) {
+    debug('ERROR en GET /api/user/statistics:', error);
+    debug('Error message:', error.message);
+    debug('Error stack:', error.stack);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/user/statistics:', error);
     res.status(500).json({ error: 'Error interno del servidor', details: error.message });
   }
@@ -261,6 +315,10 @@ router.delete('/account', auth, async (req, res) => {
     
     res.json({ message: 'Tu cuenta ha sido eliminada exitosamente' });
   } catch (error) {
+    debug('ERROR en DELETE /api/user/account:', error);
+    debug('Error message:', error.message);
+    debug('Error stack:', error.stack);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/user/account DELETE:', error);
     res.status(500).json({ error: 'Error interno del servidor', details: error.message });
     }

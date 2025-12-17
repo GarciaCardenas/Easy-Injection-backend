@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const debug = require('debug')('easyinjection:email');
 const config = require("config");
 
 class EmailService {
@@ -53,6 +54,10 @@ class EmailService {
       await this.transporter.sendMail(mailOptions);
       return true;
     } catch (error) {
+      debug('ERROR enviando email de reset password:', error);
+      debug('Error message:', error.message);
+      debug('Error stack:', error.stack);
+      debug('To:', email);
       return false;
     }
   }
@@ -69,6 +74,11 @@ class EmailService {
       await this.transporter.sendMail(mailOptions);
       return true;
     } catch (error) {
+      debug('ERROR enviando email genérico:', error);
+      debug('Error message:', error.message);
+      debug('Error stack:', error.stack);
+      debug('To:', to);
+      debug('Subject:', subject);
       throw error;
     }
   }

@@ -14,14 +14,16 @@ const profileSchema = new mongoose.Schema({
 });
 
 const sessionSchema = new mongoose.Schema({
-    token: String,
+    sessionId: { type: String, unique: false },
+    refreshToken: String,
     device: String,
     browser: String,
     os: String,
     location: String,
     ip: String,
-    lastActivity: { type: Date, default: Date.now }
-}, { _id: false });
+    lastActivity: { type: Date, default: Date.now },
+    createdAt: { type: Date, default: Date.now }
+});
 
 const userSchema = new mongoose.Schema({
     username: { type: String, minlength: 3, maxlength: 50, required: true, unique: true },
@@ -42,7 +44,8 @@ const userSchema = new mongoose.Schema({
     passwordResetExpires: { type: Date },
     acceptedTerms: { type: Boolean, required: true, default: false },
     acceptedTermsDate: { type: Date },
-    activeSessions: [sessionSchema]
+    activeSessions: [sessionSchema],
+    tokenVersion: { type: Number, default: 0 }
 });
 
 const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
@@ -52,7 +55,7 @@ class User extends BaseModel {
     #fecha_registro; #ultimo_login; #estado_cuenta; #email_verificado; #token_verificacion;
     #fecha_expiracion_token; #activo; #codigo_verificacion; #fecha_verificacion;
     #googleId; #passwordResetToken; #passwordResetExpires; #acceptedTerms; #acceptedTermsDate;
-    #activeSessions;
+    #activeSessions; #tokenVersion;
 
     constructor(data = {}) {
         super(data);
@@ -76,6 +79,7 @@ class User extends BaseModel {
         this.#acceptedTerms = plainData.acceptedTerms !== undefined ? plainData.acceptedTerms : false;
         this.#acceptedTermsDate = plainData.acceptedTermsDate;
         this.#activeSessions = plainData.activeSessions || [];
+        this.#tokenVersion = plainData.tokenVersion !== undefined ? plainData.tokenVersion : 0;
         debug('Usuario creado: %s (%s)', this.#username, this.#email);
     }
 
@@ -116,6 +120,7 @@ class User extends BaseModel {
     get acceptedTermsDate() { return this.#acceptedTermsDate; }
 
     get activeSessions() { return [...this.#activeSessions]; }
+    get tokenVersion() { return this.#tokenVersion; }
 
     activate() {
         debug('Activando usuario: %s', this.#username);
@@ -126,12 +131,12 @@ class User extends BaseModel {
         this.#estado_cuenta = 'activo';
     }
 
-    generateAuthToken() {
-        debug('Generando token JWT para usuario: %s', this.#username);
+    generateAuthToken(sessionId) {
+        debug('Generando token JWT para usuario: %s (sessionId: %s)', this.#username, sessionId);
         const token = jwt.sign(
-            { _id: this._id, username: this.#username, email: this.#email },
+            { _id: this._id, username: this.#username, email: this.#email, tokenVersion: this.#tokenVersion, sessionId },
             config.get('jwtPrivateKey'),
-            { expiresIn: '24h' }
+            { expiresIn: '15m' }
         );
         return token;
     }
@@ -159,23 +164,69 @@ class User extends BaseModel {
 
     addSession(sessionData) {
         if (!this.#activeSessions) this.#activeSessions = [];
-        // Remover sesión duplicada del mismo dispositivo/navegador/IP
+        // Remover sesión antigua del mismo dispositivo/navegador/IP (misma ubicación física)
         this.#activeSessions = this.#activeSessions.filter(s => 
             !(s.device === sessionData.device && 
               s.browser === sessionData.browser &&
               s.ip === sessionData.ip)
         );
         this.#activeSessions.push(sessionData);
-        debug('Sesión agregada para usuario: %s', this.#username);
+        debug('Sesión agregada para usuario: %s (tokenVersion: %d)', this.#username, this.#tokenVersion);
     }
 
     clearAllSessions() {
         this.#activeSessions = [];
-        debug('Todas las sesiones eliminadas para usuario: %s', this.#username);
+        this.#tokenVersion++;
+        debug('Todas las sesiones eliminadas y tokenVersion incrementado para usuario: %s (nueva versión: %d)', this.#username, this.#tokenVersion);
+    }
+
+    clearSessionsOnly() {
+        this.#activeSessions = [];
+        debug('Sesiones eliminadas sin incrementar tokenVersion para usuario: %s', this.#username);
     }
 
     getActiveSessionCount() {
         return this.#activeSessions ? this.#activeSessions.length : 0;
+    }
+
+    generateRefreshToken() {
+        const crypto = require('crypto');
+        const refreshToken = crypto.randomBytes(64).toString('hex');
+        debug('Refresh token generado para usuario: %s', this.#username);
+        return refreshToken;
+    }
+
+    hashRefreshToken(refreshToken) {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+        return hash;
+    }
+
+    verifyRefreshToken(providedToken, sessionId) {
+        const hashedProvidedToken = this.hashRefreshToken(providedToken);
+        const session = this.#activeSessions.find(s => s.sessionId === sessionId);
+        
+        if (!session || !session.refreshToken) {
+            debug('Sesión no encontrada o sin refresh token para sessionId: %s', sessionId);
+            return false;
+        }
+
+        const isValid = session.refreshToken === hashedProvidedToken;
+        debug('Verificación de refresh token para usuario %s: %s', this.#username, isValid ? 'exitosa' : 'fallida');
+        return isValid;
+    }
+
+    updateRefreshToken(sessionId, newRefreshToken) {
+        const session = this.#activeSessions.find(s => s.sessionId === sessionId);
+        if (session) {
+            session.refreshToken = this.hashRefreshToken(newRefreshToken);
+            debug('Refresh token rotado para sessionId: %s', sessionId);
+        }
+    }
+
+    removeSession(sessionId) {
+        this.#activeSessions = this.#activeSessions.filter(s => s.sessionId !== sessionId);
+        debug('Sesión removida: %s para usuario: %s', sessionId, this.#username);
     }
 
     setPasswordResetToken(token, expiresInHours = 1) {
@@ -211,7 +262,7 @@ class User extends BaseModel {
                 'fecha_registro', 'ultimo_login', 'estado_cuenta', 'email_verificado',
                 'token_verificacion', 'fecha_expiracion_token', 'activo', 'codigo_verificacion',
                 'fecha_verificacion', 'googleId', 'passwordResetToken', 'passwordResetExpires',
-                'acceptedTerms', 'acceptedTermsDate'
+                'acceptedTerms', 'acceptedTermsDate', 'tokenVersion'
             ]),
             activeSessions: this.#activeSessions
         };

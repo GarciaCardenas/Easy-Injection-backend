@@ -1,4 +1,5 @@
 const express = require("express");
+const debug = require('debug')('easyinjection:api:notifications');
 const auth = require("../middleware/auth.middleware");
 const { Notification } = require("../../models/user/notification.model");
 
@@ -11,6 +12,9 @@ router.get("/", auth, async (req, res) => {
       .limit(50);
     res.json(notifications);
   } catch (error) {
+    debug('ERROR en GET /api/notifications:', error);
+    debug('Error message:', error.message);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/notifications:', error);
     res.status(500).json({ error: "Error interno del servidor", details: error.message });
   }
@@ -24,6 +28,9 @@ router.get('/unread-count', auth, async (req, res) => {
     });
     res.json({ count });
   } catch (error) {
+    debug('ERROR en GET /api/notifications/unread-count:', error);
+    debug('Error message:', error.message);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/notifications/unread-count:', error);
     res.status(500).json({ error: 'Error interno del servidor', details: error.message });
   }
@@ -38,6 +45,10 @@ router.put('/:id/read', auth, async (req, res) => {
     );
     res.json(notification);
   } catch (error) {
+    debug('ERROR en PUT /api/notifications/:id/read:', error);
+    debug('Error message:', error.message);
+    debug('Notification ID:', req.params.id);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/notifications/:id/read:', error);
     res.status(500).json({ error: 'Error interno del servidor', details: error.message });
   }
@@ -51,6 +62,9 @@ router.post('/mark-all-read', auth, async (req, res) => {
     );
     res.json({ message: 'Todas las notificaciones marcadas como leídas' });
   } catch (error) {
+    debug('ERROR en POST /api/notifications/mark-all-read:', error);
+    debug('Error message:', error.message);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/notifications/mark-all-read:', error);
     res.status(500).json({ error: 'Error interno del servidor', details: error.message });
   }
@@ -64,6 +78,10 @@ router.delete('/:id', auth, async (req, res) => {
     });
     res.json({ message: 'Notificación eliminada' });
   } catch (error) {
+    debug('ERROR en DELETE /api/notifications/:id:', error);
+    debug('Error message:', error.message);
+    debug('Notification ID:', req.params.id);
+    debug('User ID:', req.user?._id);
     console.error('Error en /api/notifications/:id DELETE:', error);
     res.status(500).json({ error: 'Error interno del servidor', details: error.message });
   }

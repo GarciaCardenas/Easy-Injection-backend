@@ -72,7 +72,7 @@ class Score {
         return Math.round((this.#puntos_cuestionario / this.#total_puntos_cuestionario) * 100);
     }
 
-    calculateFinalScore() {
+    calculateFinalScore(vulnerabilities = []) {
         // Componente de cuestionario (60% del total)
         let quizScore = 0;
         if (this.#total_puntos_cuestionario > 0) {
@@ -83,7 +83,28 @@ class Score {
         }
         
         // Componente de vulnerabilidades (base 40 puntos)
-        const penalizacionVulnerabilidades = this.#vulnerabilidades_encontradas * 5;
+        // Penalización según criticidad:
+        // Crítica: 8 puntos, Alta: 6 puntos, Media: 4 puntos, Baja: 2 puntos
+        let penalizacionVulnerabilidades = 0;
+        
+        if (vulnerabilities && vulnerabilities.length > 0) {
+            vulnerabilities.forEach(vuln => {
+                const severity = vuln.nivel_severidad_id?.nivel?.toLowerCase() || vuln.severity?.toLowerCase() || 'media';
+                if (severity === 'crítica' || severity === 'critical') {
+                    penalizacionVulnerabilidades += 20;
+                } else if (severity === 'alta' || severity === 'high') {
+                    penalizacionVulnerabilidades += 15;
+                } else if (severity === 'media' || severity === 'medium') {
+                    penalizacionVulnerabilidades += 10;
+                } else if (severity === 'baja' || severity === 'low') {
+                    penalizacionVulnerabilidades += 5;
+                }
+            });
+        } else {
+            // Fallback: usar contador si no hay detalles de vulnerabilidades
+            penalizacionVulnerabilidades = this.#vulnerabilidades_encontradas * 5;
+        }
+        
         let vulnerabilityScore = 40;
         let penalizacionExcedente = 0;
         

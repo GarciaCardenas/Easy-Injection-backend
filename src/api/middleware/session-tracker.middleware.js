@@ -1,7 +1,7 @@
 const UAParser = require("ua-parser-js");
 const geoip = require("geoip-lite");
 
-const createSessionData = (req, token) => {
+const createSessionData = (req, sessionId) => {
   const parser = new UAParser(req.headers["user-agent"]);
   const ua = parser.getResult();
 
@@ -54,13 +54,14 @@ const createSessionData = (req, token) => {
   const os = `${ua.os.name || "Unknown"} ${ua.os.version || ""}`.trim();
 
   return {
-    token,
+    sessionId,
     ip,
     location,
     device: deviceType,
     browser,
     os,
     lastActivity: new Date(),
+    createdAt: new Date()
   };
 };
 

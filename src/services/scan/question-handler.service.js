@@ -1,6 +1,7 @@
 const { Question } = require('../../models/quiz/question.model');
 const { Answer } = require('../../models/quiz/answer.model');
 const crypto = require('crypto');
+const debug = require('debug')('easyinjection:scan:questions');
 
 class QuestionHandler {
     constructor(emitter, logger, askedPhases = []) {
@@ -79,6 +80,9 @@ class QuestionHandler {
                 answerIds: shuffledAnswers.map(a => a._id)
             };
         } catch (error) {
+            debug('ERROR en getRandomQuestionByPhase:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
             this.logger.addLog(`Error obteniendo pregunta de la base de datos: ${error.message}`, 'error');
             return null;
         }
@@ -226,8 +230,12 @@ class QuestionHandler {
                 );
             }
             
-            console.log(`Intento ${currentAttempts} guardado en BD`, 'info');
+            debug(`Intento ${currentAttempts} guardado en BD`);
         } catch (error) {
+            debug('ERROR en saveAttemptToDb:', error);
+            debug('Error message:', error.message);
+            debug('Error stack:', error.stack);
+            debug('ScanId:', this.emitter.scanId);
             this.logger.addLog(`Error en saveAttemptToDb: ${error.message}`, 'warning');
         }
     }

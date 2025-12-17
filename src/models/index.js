@@ -24,6 +24,7 @@ const { Answer, validate: validateAnswer } = require('./quiz/answer.model');
 // Catalog Models
 const { GestorBD, validate: validateGestorBD } = require('./catalog/db-manager.model');
 const { VulnerabilityType, validate: validateVulnerabilityType } = require('./catalog/vulnerability-type.model');
+const { VulnerabilitySubtype, validate: validateVulnerabilitySubtype } = require('./catalog/vulnerability-subtype.model');
 const { SeverityLevel, validate: validateSeverityLevel } = require('./catalog/severity-level.model');
 
 module.exports = {
@@ -69,6 +70,8 @@ module.exports = {
     validateDbManager: validateGestorBD, // Alias para compatibilidad
     VulnerabilityType,
     validateVulnerabilityType,
+    VulnerabilitySubtype,
+    validateVulnerabilitySubtype,
     SeverityLevel,
     validateSeverityLevel
 };

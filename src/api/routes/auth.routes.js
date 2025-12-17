@@ -1,4 +1,5 @@
 const express = require("express");
+const debug = require('debug')('easyinjection:api:auth');
 const passport = require("passport");
 const auth = require("../middleware/auth.middleware");
 const {
@@ -37,6 +38,10 @@ router.get("/me", auth, async (req, res) => {
       user: user.toDTO()
     });
   } catch (error) {
+    debug('ERROR en GET /api/auth/me:', error);
+    debug('Error message:', error.message);
+    debug('Error stack:', error.stack);
+    debug('User ID:', req.user?._id);
     res.status(500).json({
       error: "Error interno del servidor",
     });
@@ -56,8 +61,17 @@ router.get(
   passport.authenticate("google", { session: false }),
   async (req, res) => {
     try {
-      const token = req.user.generateAuthToken();
-      const sessionData = createSessionData(req, token);
+      const crypto = require('crypto');
+      const sessionId = crypto.randomBytes(32).toString('hex');
+      
+      // Generate refresh token
+      const refreshToken = req.user.generateRefreshToken();
+      const hashedRefreshToken = req.user.hashRefreshToken(refreshToken);
+      
+      const sessionData = {
+        ...createSessionData(req, sessionId),
+        refreshToken: hashedRefreshToken
+      };
 
       if (!req.user.activeSessions) {
         req.user.activeSessions = [];
@@ -71,16 +85,37 @@ router.get(
 
       req.user.activeSessions.push(sessionData);
 
-      if (req.user.activeSessions.length > 10) {
+      if (req.user.activeSessions.length > 5) {
         req.user.activeSessions.sort((a, b) => 
-          new Date(b.lastActivity) - new Date(a.lastActivity)
+          new Date(b.createdAt) - new Date(a.createdAt)
         );
-        req.user.activeSessions = req.user.activeSessions.slice(0, 10);
+        req.user.activeSessions = req.user.activeSessions.slice(0, 5);
       }
 
       await req.user.save();
-      res.redirect(`${process.env.FRONTEND_URL}/dashboard?token=${token}`);
+      
+      // Generate short-lived JWT (15 minutes)
+      const token = req.user.generateAuthToken(sessionId);
+      
+      res.cookie('auth_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 15 * 60 * 1000 // 15 minutes
+      });
+      
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+      
+      res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
     } catch (error) {
+      debug('ERROR en GET /api/auth/google/callback:', error);
+      debug('Error message:', error.message);
+      debug('Error stack:', error.stack);
       res.redirect("/login?error=internal_server_error");
     }
   }
