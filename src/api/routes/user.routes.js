@@ -5,6 +5,89 @@ const auth = require('../middleware/auth.middleware');
 const { User } = require('../../models/user/user.model');
 const router = express.Router();
 
+function validatePasswordStrength(password, email, username) {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumber = /\d/.test(password);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+    
+    if (password.length < minLength) {
+        return { valid: false, message: 'La contraseña debe tener al menos 8 caracteres' };
+    }
+    if (!hasUpperCase) {
+        return { valid: false, message: 'La contraseña debe incluir al menos una letra mayúscula' };
+    }
+    if (!hasLowerCase) {
+        return { valid: false, message: 'La contraseña debe incluir al menos una letra minúscula' };
+    }
+    if (!hasNumber) {
+        return { valid: false, message: 'La contraseña debe incluir al menos un número' };
+    }
+    if (!hasSpecialChar) {
+        return { valid: false, message: 'La contraseña debe incluir al menos un carácter especial' };
+    }
+
+    // Validar que la contraseña no sea igual al email (case insensitive)
+    if (email && password.toLowerCase() === email.toLowerCase()) {
+        return { valid: false, message: 'La contraseña no puede ser igual a tu correo electrónico' };
+    }
+
+    // Validar que la contraseña no sea igual al username (case insensitive)
+    if (username && password.toLowerCase() === username.toLowerCase()) {
+        return { valid: false, message: 'La contraseña no puede ser igual a tu nombre de usuario' };
+    }
+
+    // Validar que la contraseña no contenga el email o username
+    if (email && password.toLowerCase().includes(email.toLowerCase())) {
+        return { valid: false, message: 'La contraseña no puede contener tu correo electrónico' };
+    }
+
+    if (username && password.toLowerCase().includes(username.toLowerCase())) {
+        return { valid: false, message: 'La contraseña no puede contener tu nombre de usuario' };
+    }
+
+    // Detectar secuencias numéricas predecibles
+    const numericSequences = [
+        '012', '123', '234', '345', '456', '567', '678', '789', '890',
+        '987', '876', '765', '654', '543', '432', '321', '210',
+        '111', '222', '333', '444', '555', '666', '777', '888', '999', '000'
+    ];
+
+    const passwordLower = password.toLowerCase();
+    for (const sequence of numericSequences) {
+        if (password.includes(sequence)) {
+            return { valid: false, message: 'La contraseña no puede contener secuencias numéricas predecibles (ej: 123, 987, 111)' };
+        }
+    }
+
+    // Detectar secuencias alfabéticas predecibles
+    const alphabeticSequences = [
+        'abc', 'bcd', 'cde', 'def', 'efg', 'fgh', 'ghi', 'hij', 'ijk', 'jkl', 'klm', 'lmn', 'mno', 'nop', 'opq', 'pqr', 'qrs', 'rst', 'stu', 'tuv', 'uvw', 'vwx', 'wxy', 'xyz',
+        'zyx', 'yxw', 'xwv', 'wvu', 'vut', 'uts', 'tsr', 'srq', 'rqp', 'qpo', 'pon', 'onm', 'nml', 'mlk', 'lkj', 'kji', 'jih', 'ihg', 'hgf', 'gfe', 'fed', 'edc', 'dcb', 'cba',
+        'aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff', 'ggg', 'hhh', 'iii', 'jjj', 'kkk', 'lll', 'mmm', 'nnn', 'ooo', 'ppp', 'qqq', 'rrr', 'sss', 'ttt', 'uuu', 'vvv', 'www', 'xxx', 'yyy', 'zzz'
+    ];
+
+    for (const sequence of alphabeticSequences) {
+        if (passwordLower.includes(sequence)) {
+            return { valid: false, message: 'La contraseña no puede contener secuencias alfabéticas predecibles (ej: abc, xyz, aaa)' };
+        }
+    }
+
+    // Detectar patrones de teclado comunes
+    const keyboardPatterns = [
+        'qwerty', 'qwertz', 'azerty', 'asdfgh', 'zxcvbn', 'qweasd', 'asdzxc'
+    ];
+
+    for (const pattern of keyboardPatterns) {
+        if (passwordLower.includes(pattern)) {
+            return { valid: false, message: 'La contraseña no puede contener patrones de teclado predecibles (ej: qwerty, asdfgh)' };
+        }
+    }
+
+    return { valid: true };
+}
+
 router.get('/profile', auth, async (req, res) => {
     try {
         const { User } = require('../../models/user/user.model');
@@ -114,12 +197,6 @@ router.put('/password', auth, async (req, res) => {
             });
         }
 
-        if (newPassword.length < 8) {
-            return res.status(400).json({
-                error: 'La nueva contraseña debe tener al menos 8 caracteres'
-            });
-        }
-
         const userDoc = await User.Model.findById(req.user._id);
         if (!userDoc) {
             return res.status(404).json({
@@ -129,10 +206,27 @@ router.put('/password', auth, async (req, res) => {
 
         const user = User.fromMongoose(userDoc);
 
+        // Validar contraseña actual
         const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.contrasena_hash);
         if (!isCurrentPasswordValid) {
             return res.status(400).json({
                 error: 'La contraseña actual es incorrecta'
+            });
+        }
+
+        // Validar fortaleza de la nueva contraseña
+        const passwordValidation = validatePasswordStrength(newPassword, user.email, user.username);
+        if (!passwordValidation.valid) {
+            return res.status(400).json({ 
+                error: passwordValidation.message 
+            });
+        }
+
+        // Validar que la nueva contraseña no sea la misma que la anterior
+        const isSamePassword = await bcrypt.compare(newPassword, user.contrasena_hash);
+        if (isSamePassword) {
+            return res.status(400).json({ 
+                error: 'La nueva contraseña debe ser diferente a la contraseña anterior' 
             });
         }
 

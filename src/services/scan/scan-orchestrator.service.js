@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const debug = require('debug')('easyinjection:scan:orchestrator');
+const axios = require('axios');
 
 const { validateAndNormalizeConfig } = require('./config-validator.service');
 const Logger = require('./logger.service');
@@ -408,6 +409,18 @@ class ScanOrchestrator extends EventEmitter {
         
         this.logger.addLog('Validando configuración del escaneo...', 'info');
         this.logger.addLog(`URL objetivo: ${this.config.url}`, 'info');
+        
+        // Verificar que la URL esté viva antes de continuar
+        this.logger.addLog('Verificando conectividad con la URL objetivo...', 'info');
+        const isAlive = await this.checkUrlAlive(this.config.url);
+        
+        if (!isAlive) {
+            const errorMsg = `La URL objetivo ${this.config.url} no está accesible o no responde. El escaneo no puede continuar.`;
+            this.logger.addLog(errorMsg, 'error');
+            throw new Error(errorMsg);
+        }
+        
+        this.logger.addLog('URL objetivo verificada correctamente', 'success');
         this.logger.addLog(`Flags activas: SQLi=${this.config.flags.sqli}, XSS=${this.config.flags.xss}`, 'info');
         
         await this.sqlmapExecutor.checkAvailability();
@@ -420,6 +433,41 @@ class ScanOrchestrator extends EventEmitter {
         await this.questionHandler.askQuestion(null, 'init');
         
         this.logger.addLog('Inicialización completada', 'success');
+    }
+
+    async checkUrlAlive(url) {
+        try {
+            debug(`Verificando URL: ${url}`);
+            
+            // Intentar hacer una petición GET simple con timeout de 10 segundos
+            const response = await axios.get(url, {
+                timeout: 10000,
+                maxRedirects: 5,
+                validateStatus: function (status) {
+                    // Aceptar cualquier código de status entre 200-499
+                    // (incluso 404 significa que el servidor está vivo)
+                    return status >= 200 && status < 500;
+                },
+                headers: {
+                    'User-Agent': 'EasyInjection-Scanner/1.0'
+                }
+            });
+            
+            debug(`URL respondió con status: ${response.status}`);
+            return true;
+        } catch (error) {
+            debug(`Error al verificar URL: ${error.message}`);
+            
+            // Si hay respuesta del servidor (aunque sea error), la URL está viva
+            if (error.response) {
+                debug(`Servidor respondió con status: ${error.response.status}`);
+                // Incluso 500-599 indica que el servidor está vivo
+                return error.response.status >= 200 && error.response.status < 600;
+            }
+            
+            // Errores de red/timeout indican que la URL no está accesible
+            return false;
+        }
     }
 
     async runDiscoveryPhase() {

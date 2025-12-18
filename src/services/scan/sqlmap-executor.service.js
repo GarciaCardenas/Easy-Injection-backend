@@ -21,7 +21,7 @@ class SqlmapExecutor {
             level: config.level || 1,
             risk: config.risk || 1,
             threads: config.threads || 1,
-            timeout: config.timeout || 30
+            timeout: config.timeout || 90
         };
 
         this.tmpDir = config.tmpDir || path.join(os.tmpdir(), 'easyinjection_sqlmap_tmp');
@@ -196,7 +196,7 @@ class SqlmapExecutor {
             timeoutTimer = setTimeout(async () => {
                 if (this.activeProcesses.has('sqlmap-crawl') && !crawlFinished) {
                     await this._gracefulKill(proc);
-                    this.logger.addLog('Timeout de crawling alcanzado, intentando procesar resultados...', 'warning');
+                    this.logger.addLog(`Timeout de crawling alcanzado (${this.toolConfig.timeout} segundos), intentando procesar resultados...`, 'warning');
                     await processCrawlResults();
                 }
             }, this.toolConfig.timeout * 1000);

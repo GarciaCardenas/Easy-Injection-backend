@@ -83,8 +83,7 @@ class Score {
         }
         
         // Componente de vulnerabilidades (base 40 puntos)
-        // Penalización según criticidad:
-        // Crítica: 8 puntos, Alta: 6 puntos, Media: 4 puntos, Baja: 2 puntos
+        // Penalización según criticidad
         let penalizacionVulnerabilidades = 0;
         
         if (vulnerabilities && vulnerabilities.length > 0) {

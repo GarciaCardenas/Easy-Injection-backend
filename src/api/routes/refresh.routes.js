@@ -28,10 +28,22 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Decodificar el JWT antiguo sin verificar (puede estar expirado)
+        // Decodificar el JWT antiguo sin verificar expiración (puede estar expirado)
+        // Esto es válido para refresh porque verificamos el refresh token
         let decoded;
         try {
-            decoded = jwt.decode(oldJwt);
+            // Primero intentar verificar normalmente
+            try {
+                decoded = jwt.verify(oldJwt, config.get('jwtPrivateKey'));
+            } catch (verifyErr) {
+                // Si falla por expiración, decodificar sin verificar
+                if (verifyErr.name === 'TokenExpiredError') {
+                    decoded = jwt.decode(oldJwt);
+                    debug('JWT expirado pero válido para refresh');
+                } else {
+                    throw verifyErr;
+                }
+            }
         } catch (err) {
             debug('Error decodificando JWT:', err);
             return res.status(401).json({ 

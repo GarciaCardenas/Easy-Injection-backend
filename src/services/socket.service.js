@@ -532,7 +532,10 @@ class SocketService {
                     await scan.save();
                 }
 
-                this.io.to(room).emit('scan:error', data);
+                // Enviar error con formato esperado por el frontend: { message: string }
+                this.io.to(room).emit('scan:error', { 
+                    message: data.error || 'Error desconocido en el escaneo' 
+                });
                 this.activeScans.delete(scanId);
             } catch (error) {
                 debug('ERROR en scan:error handler:', error);

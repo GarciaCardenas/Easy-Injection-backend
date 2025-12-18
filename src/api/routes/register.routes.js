@@ -6,7 +6,7 @@ const { User, validate } = require('../../models/user/user.model');
 const emailService = require('../../services/email.service');
 const router = express.Router();
 
-function validatePasswordStrength(password) {
+function validatePasswordStrength(password, email, username) {
     const minLength = 8;
     const hasUpperCase = /[A-Z]/.test(password);
     const hasLowerCase = /[a-z]/.test(password);
@@ -28,12 +28,74 @@ function validatePasswordStrength(password) {
     if (!hasSpecialChar) {
         return { valid: false, message: 'La contraseña debe incluir al menos un carácter especial' };
     }
+
+    // Validar que la contraseña no sea igual al email (case insensitive)
+    if (email && password.toLowerCase() === email.toLowerCase()) {
+        return { valid: false, message: 'La contraseña no puede ser igual a tu correo electrónico' };
+    }
+
+    // Validar que la contraseña no sea igual al username (case insensitive)
+    if (username && password.toLowerCase() === username.toLowerCase()) {
+        return { valid: false, message: 'La contraseña no puede ser igual a tu nombre de usuario' };
+    }
+
+    // Validar que la contraseña no contenga el email o username
+    if (email && password.toLowerCase().includes(email.toLowerCase())) {
+        return { valid: false, message: 'La contraseña no puede contener tu correo electrónico' };
+    }
+
+    if (username && password.toLowerCase().includes(username.toLowerCase())) {
+        return { valid: false, message: 'La contraseña no puede contener tu nombre de usuario' };
+    }
+
+    // Detectar secuencias numéricas predecibles
+    const numericSequences = [
+        '012', '123', '234', '345', '456', '567', '678', '789', '890',
+        '987', '876', '765', '654', '543', '432', '321', '210',
+        '111', '222', '333', '444', '555', '666', '777', '888', '999', '000'
+    ];
+
+    const passwordLower = password.toLowerCase();
+    for (const sequence of numericSequences) {
+        if (password.includes(sequence)) {
+            return { valid: false, message: 'La contraseña no puede contener secuencias numéricas predecibles (ej: 123, 987, 111)' };
+        }
+    }
+
+    // Detectar secuencias alfabéticas predecibles
+    const alphabeticSequences = [
+        'abc', 'bcd', 'cde', 'def', 'efg', 'fgh', 'ghi', 'hij', 'ijk', 'jkl', 'klm', 'lmn', 'mno', 'nop', 'opq', 'pqr', 'qrs', 'rst', 'stu', 'tuv', 'uvw', 'vwx', 'wxy', 'xyz',
+        'zyx', 'yxw', 'xwv', 'wvu', 'vut', 'uts', 'tsr', 'srq', 'rqp', 'qpo', 'pon', 'onm', 'nml', 'mlk', 'lkj', 'kji', 'jih', 'ihg', 'hgf', 'gfe', 'fed', 'edc', 'dcb', 'cba',
+        'aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff', 'ggg', 'hhh', 'iii', 'jjj', 'kkk', 'lll', 'mmm', 'nnn', 'ooo', 'ppp', 'qqq', 'rrr', 'sss', 'ttt', 'uuu', 'vvv', 'www', 'xxx', 'yyy', 'zzz'
+    ];
+
+    for (const sequence of alphabeticSequences) {
+        if (passwordLower.includes(sequence)) {
+            return { valid: false, message: 'La contraseña no puede contener secuencias alfabéticas predecibles (ej: abc, xyz, aaa)' };
+        }
+    }
+
+    // Detectar patrones de teclado comunes
+    const keyboardPatterns = [
+        'qwerty', 'qwertz', 'azerty', 'asdfgh', 'zxcvbn', 'qweasd', 'asdzxc'
+    ];
+
+    for (const pattern of keyboardPatterns) {
+        if (passwordLower.includes(pattern)) {
+            return { valid: false, message: 'La contraseña no puede contener patrones de teclado predecibles (ej: qwerty, asdfgh)' };
+        }
+    }
+
     return { valid: true };
 }
 
 router.post('/', async (req, res) => {
     try {
-        const passwordValidation = validatePasswordStrength(req.body.password);
+        const passwordValidation = validatePasswordStrength(
+            req.body.password, 
+            req.body.email, 
+            req.body.username
+        );
 
         if (!passwordValidation.valid) {
             return res.status(400).json({ error: passwordValidation.message });
