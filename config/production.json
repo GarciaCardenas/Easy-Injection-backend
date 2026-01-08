@@ -1,0 +1,16 @@
+{
+  "baseUrlFrontend": "",
+  "jwtPrivateKey": "",
+  "db": "",
+  "sqlmap": {
+    "path": "/usr/bin/sqlmap",
+    "timeout": 300000
+  },
+  "dalfox": {
+    "path": "/usr/local/bin/dalfox"
+  },
+  "email": {
+    "user": "",
+    "password": ""
+  }
+}

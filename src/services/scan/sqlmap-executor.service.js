@@ -68,9 +68,11 @@ class SqlmapExecutor {
             'do you want to check for the existence of site\'s sitemap(.xml)=N',
             'do you want to normalize crawling results=Y',
             'do you want to store crawling results to a temporary file for eventual further processing with other tools=Y',
+            'do you want to test this URL=Y',
             'Do you want to skip further tests involving it?=n'
         ];
-        return `--answers="${answers.join(',')}"`;
+        // Retornar array con dos elementos: flag y valor
+        return ['--answers', answers.join(',')];
     }
 
     async runCrawl() {
@@ -81,8 +83,10 @@ class SqlmapExecutor {
         const args = [
             '-u', this.config.url,
             '--crawl', this.toolConfig.crawlDepth.toString(),
-            this._buildAnswersArg(),
+            '--batch',  // Modo batch para evitar prompts interactivos
+            ...this._buildAnswersArg(),  // Spread para insertar ambos elementos
             '--forms',
+            '--crawl-exclude', 'logout',  // Excluir URLs de logout del crawling
             ...this.toolConfig.commonArgs,
             '--threads', this.toolConfig.threads.toString(),
             '--tmp-dir', this.tmpDir,
@@ -105,6 +109,7 @@ class SqlmapExecutor {
             debug('[SQLmap Crawl Spawn] Ejecutable:', executable);
             debug('[SQLmap Crawl Spawn] Argumentos:', spawnArgs);
             debug('[SQLmap Crawl Spawn] Comando completo:', executable, spawnArgs.join(' '), '\n');
+            
             const proc = spawn(executable, spawnArgs, spawnOpts);
             this.activeProcesses.set('sqlmap-crawl', proc);
 
@@ -183,7 +188,12 @@ class SqlmapExecutor {
                 if (code === 0 || code === null) {
                     await processCrawlResults();
                 } else if (!crawlFinished) {
-                    reject(new Error(`sqlmap crawl exited with code ${code}`));
+                    // Intentar procesar de todos modos por si hay CSV
+                    try {
+                        await processCrawlResults();
+                    } catch (err) {
+                        reject(new Error(`sqlmap crawl exited with code ${code}`));
+                    }
                 }
             });
 

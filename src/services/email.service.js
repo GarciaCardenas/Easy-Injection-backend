@@ -16,7 +16,7 @@ class EmailService {
   async sendVerificationEmail(email, username, verificationToken) {
     const verificationUrl = `${config.get(
       "baseUrlFrontend"
-    )}verify-success?token=${verificationToken}`;
+    )}/verify-success?token=${verificationToken}`;
 
     const mailOptions = {
       from: config.get("email.user"),
